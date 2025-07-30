@@ -18,6 +18,43 @@ A professional, extensible VPN management panel supporting multiple protocols wi
 - **Configuration Export**: Download VPN configs for all protocols
 - **Extensible Architecture**: Easy to add new protocols and features
 
+### 🛡️ Enterprise Security Features
+
+#### Security Monitoring
+- **Real-time Log Monitoring**: Comprehensive security event tracking
+- **Intrusion Detection System (HIDS)**: Host-based intrusion detection
+- **Security Alerts**: Automated threat detection and notification
+- **IP Blocking**: Automatic blocking of suspicious IP addresses
+- **Security Dashboard**: Real-time security statistics and monitoring
+
+#### Access Control & Authentication
+- **Rate Limiting**: Configurable API rate limiting with IP/user-based rules
+- **Secret Management**: Automatic generation and rotation of security keys
+- **Non-Root Execution**: Secure execution with minimal privileges
+- **Permission Management**: File and directory permission monitoring
+- **Security Baseline**: System security baseline creation and verification
+
+#### Data Protection
+- **Complete Backup System**: Full, database, and config-only backups
+- **Encrypted Backups**: Secure backup encryption and storage
+- **Log Aggregation**: Centralized log collection and analysis
+- **Audit Logging**: Comprehensive audit trail for all actions
+- **Data Integrity**: File integrity monitoring and verification
+
+#### Monitoring & Analytics
+- **Real-time Monitoring**: Live system and traffic monitoring
+- **Performance Analytics**: Detailed performance metrics and analysis
+- **Traffic Analytics**: Comprehensive traffic analysis and reporting
+- **System Health**: Continuous system health monitoring
+- **Alert Management**: Configurable alert rules and notifications
+
+#### Container Security (Docker)
+- **Container Isolation**: Secure container execution
+- **Health Checks**: Automated container health monitoring
+- **Security Scanning**: Container vulnerability scanning
+- **Resource Limits**: Container resource usage limits
+- **Network Security**: Isolated container networking
+
 ## 🏗️ Architecture
 
 ### Clean Architecture
@@ -51,7 +88,9 @@ vpn-panel/
 
 ## 📦 Installation
 
-### Quick Install (One-Line)
+### Method 1: Direct Installation (Recommended for Production)
+
+#### Quick Install (One-Line)
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/smaghili/vpn-panel/main/install.sh)
 ```
@@ -63,7 +102,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/smaghili/vpn-panel/main/instal
 - Creates systemd service
 - User must configure firewall manually
 
-### Manual Install
+#### Manual Install
 ```bash
 # Clone the repository
 git clone https://github.com/smaghili/vpn-panel.git
@@ -74,24 +113,109 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
-### Manual Installation
+#### System Requirements (Direct Installation)
+- **OS**: Ubuntu 20.04+ or Debian 11+
+- **RAM**: 1GB minimum (2GB recommended)
+- **Storage**: 5GB minimum
+- **Root Access**: Required for installation
+
+### Method 2: Docker Installation (Recommended for Development/Testing)
+
+#### Quick Docker Install
 ```bash
-# Install system dependencies
-sudo apt-get update
-sudo apt-get install -y python3 python3-pip python3-venv wireguard openvpn easy-rsa redis-server
+bash <(curl -Ls https://raw.githubusercontent.com/smaghili/vpn-panel/main/docker-install.sh)
+```
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+#### Manual Docker Install
+```bash
+# Clone the repository
+git clone https://github.com/smaghili/vpn-panel.git
+cd vpn-panel
 
-# Install Python dependencies
-pip install -r requirements.txt
+# Run Docker installation
+chmod +x docker-install.sh
+./docker-install.sh
+```
 
-# Initialize database
-python -c "from src.infrastructure.database.unified_user_repository import UnifiedUserRepository; UnifiedUserRepository('/var/lib/vpn-panel/users.db')"
+#### Docker Compose (Advanced)
+```bash
+# Clone the repository
+git clone https://github.com/smaghili/vpn-panel.git
+cd vpn-panel
 
-# Start the application
-python src/presentation/api/main.py
+# Build and start with Docker Compose
+docker-compose up -d
+
+# Access the application
+# Main Panel: http://localhost:8080
+# Prometheus: http://localhost:9090
+# Grafana: http://localhost:3000 (admin/admin)
+```
+
+#### System Requirements (Docker)
+- **OS**: Any Linux with Docker support
+- **Docker**: 20.10+
+- **Docker Compose**: 2.0+
+- **RAM**: 2GB minimum (includes monitoring stack)
+- **Storage**: 10GB minimum
+
+### Installation Comparison
+
+| Feature | Direct Install | Docker Install |
+|---------|---------------|----------------|
+| **Speed** | Fast (~2-3 min) | Medium (~5-10 min) |
+| **Resource Usage** | Low (200MB RAM) | Medium (500MB RAM) |
+| **Isolation** | ❌ | ✅ |
+| **Portability** | ❌ | ✅ |
+| **Monitoring Stack** | ❌ | ✅ (Prometheus/Grafana) |
+| **Production Ready** | ✅ | ✅ |
+| **Development** | ❌ | ✅ |
+| **Easy Updates** | ❌ | ✅ |
+
+### Post-Installation
+
+#### Access Information
+- **URL**: `http://your-server-ip:port`
+- **Default Admin**: Created during installation
+- **Security Dashboard**: `/security`
+- **Backup Management**: `/backup`
+- **Analytics**: `/analytics`
+
+#### Service Management (Direct Install)
+```bash
+# Start service
+sudo systemctl start vpn-panel
+
+# Stop service
+sudo systemctl stop vpn-panel
+
+# Check status
+sudo systemctl status vpn-panel
+
+# View logs
+sudo journalctl -u vpn-panel -f
+
+# Restart service
+sudo systemctl restart vpn-panel
+```
+
+#### Container Management (Docker)
+```bash
+# Start containers
+docker-compose up -d
+
+# Stop containers
+docker-compose down
+
+# View logs
+docker-compose logs -f vpn-panel
+
+# Restart containers
+docker-compose restart
+
+# Update containers
+docker-compose pull
+docker-compose up -d
 ```
 
 ## 🔧 Configuration
