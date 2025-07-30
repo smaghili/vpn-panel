@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - VPN Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <ul class="sidebar-menu">
+                <li><a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
+                <li><a href="/analytics"><i class="fas fa-chart-bar"></i> Analytics</a></li>
+                <li><a href="/servers"><i class="fas fa-server"></i> Servers</a></li>
+                <li><a href="/clients"><i class="fas fa-desktop"></i> Clients</a></li>
+                <li class="active"><a href="/users"><i class="fas fa-users"></i> Users</a></li>
+                <li><a href="/profile"><i class="fas fa-user"></i> Profile</a></li>
+                <li><a href="/settings"><i class="fas fa-cog"></i> Settings</a></li>
+                <li><a href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="header">
+                <h1><i class="fas fa-users"></i> User Management</h1>
+                <button class="btn btn-primary" onclick="openCreateUserModal()">
+                    <i class="fas fa-plus"></i> Create User
+                </button>
+            </header>
+
+            <!-- User Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="totalUsers">0</h3>
+                        <p>Total Users</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-wifi"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="wireguardUsers">0</h3>
+                        <p>WireGuard Users</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="openvpnUsers">0</h3>
+                        <p>OpenVPN Users</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="activeUsers">0</h3>
+                        <p>Active Users</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Users Table -->
+            <div class="content-card">
+                <div class="card-header">
+                    <h2>Users List</h2>
+                    <div class="search-box">
+                        <input type="text" id="userSearch" placeholder="Search users...">
+                        <i class="fas fa-search"></i>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Protocols</th>
+                                <th>Status</th>
+                                <th>Usage (Combined)</th>
+                                <th>Protocol Breakdown</th>
+                                <th>Last Login</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <!-- Users will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create User Modal -->
+    <div id="createUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create New User</h2>
+                <span class="close" onclick="closeCreateUserModal()">&times;</span>
+            </div>
+            <form id="createUserForm">
+                <div class="form-group">
+                    <label for="username">Username *</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Email *</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password *</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="role">Role</label>
+                    <select id="role" name="role">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="expireDate">Expire Date</label>
+                    <input type="datetime-local" id="expireDate" name="expireDate">
+                </div>
+                
+                <!-- COMBINED Limits (Total across all protocols) -->
+                <div class="form-section">
+                    <h3><i class="fas fa-chart-pie"></i> Combined Limits (Total Usage)</h3>
+                    <div class="limit-info">
+                        <p class="info-text">
+                            <i class="fas fa-info-circle"></i>
+                            These limits apply to the TOTAL usage across ALL protocols. 
+                            User can use any combination of protocols within these limits.
+                        </p>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="totalDailyLimit">Total Daily Limit (GB)</label>
+                            <input type="number" id="totalDailyLimit" name="totalDailyLimit" min="0" step="0.1">
+                            <small>Total daily usage across all protocols</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="totalMonthlyLimit">Total Monthly Limit (GB)</label>
+                            <input type="number" id="totalMonthlyLimit" name="totalMonthlyLimit" min="0" step="0.1">
+                            <small>Total monthly usage across all protocols</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Protocol Configuration -->
+                <div class="form-section">
+                    <h3><i class="fas fa-network-wired"></i> Protocol Configuration</h3>
+                    <div class="protocol-info">
+                        <p class="info-text">
+                            <i class="fas fa-info-circle"></i>
+                            Enable protocols for this user. Individual protocol usage will be tracked separately.
+                        </p>
+                    </div>
+                    
+                    <!-- WireGuard -->
+                    <div class="protocol-section">
+                        <div class="protocol-header">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enableWireGuard" name="enableWireGuard">
+                                <span class="checkmark"></span>
+                                <i class="fas fa-wifi"></i> Enable WireGuard
+                            </label>
+                        </div>
+                        <div id="wireguardConfig" class="protocol-config" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="wgServer">Server</label>
+                                    <select id="wgServer" name="wgServer">
+                                        <option value="">Select Server</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="wgAllowedIPs">Allowed IPs</label>
+                                    <input type="text" id="wgAllowedIPs" name="wgAllowedIPs" value="10.0.0.2/32">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- OpenVPN -->
+                    <div class="protocol-section">
+                        <div class="protocol-header">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enableOpenVPN" name="enableOpenVPN">
+                                <span class="checkmark"></span>
+                                <i class="fas fa-shield-alt"></i> Enable OpenVPN
+                            </label>
+                        </div>
+                        <div id="openvpnConfig" class="protocol-config" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="ovpnServer">Server</label>
+                                    <select id="ovpnServer" name="ovpnServer">
+                                        <option value="">Select Server</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="ovpnAuthType">Authentication Type</label>
+                                    <select id="ovpnAuthType" name="ovpnAuthType">
+                                        <option value="certificate_only">Certificate Only</option>
+                                        <option value="username_password">Username/Password</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div id="ovpnUserPassConfig" style="display: none;">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="ovpnUsername">OpenVPN Username</label>
+                                        <input type="text" id="ovpnUsername" name="ovpnUsername">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="ovpnPassword">OpenVPN Password</label>
+                                        <input type="password" id="ovpnPassword" name="ovpnPassword">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeCreateUserModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit User</h2>
+                <span class="close" onclick="closeEditUserModal()">&times;</span>
+            </div>
+            <form id="editUserForm">
+                <input type="hidden" id="editUserId" name="userId">
+                
+                <div class="form-group">
+                    <label for="editUsername">Username</label>
+                    <input type="text" id="editUsername" name="username" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editEmail">Email</label>
+                    <input type="email" id="editEmail" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editRole">Role</label>
+                    <select id="editRole" name="role">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editStatus">Status</label>
+                    <select id="editStatus" name="status">
+                        <option value="active">Active</option>
+                        <option value="suspended">Suspended</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editExpireDate">Expire Date</label>
+                    <input type="datetime-local" id="editExpireDate" name="expireDate">
+                </div>
+                
+                <!-- Combined Usage Statistics -->
+                <div class="form-section">
+                    <h3><i class="fas fa-chart-pie"></i> Combined Usage Statistics</h3>
+                    <div id="editCombinedUsage" class="combined-usage">
+                        <!-- Combined usage will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Protocol Usage Breakdown -->
+                <div class="form-section">
+                    <h3><i class="fas fa-network-wired"></i> Protocol Usage Breakdown</h3>
+                    <div id="editProtocolUsage" class="protocol-usage-breakdown">
+                        <!-- Protocol breakdown will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Protocol Management -->
+                <div class="form-section">
+                    <h3><i class="fas fa-cogs"></i> Protocol Management</h3>
+                    <div id="editProtocols">
+                        <!-- Protocol management will be loaded here -->
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditUserModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/users.js"></script>
+</body>
+</html> 

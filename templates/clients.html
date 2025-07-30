@@ -1,0 +1,437 @@
+{% extends "base.html" %}
+
+{% block title %}Clients - VPN Panel{% endblock %}
+{% block page_title %}Client Management{% endblock %}
+
+{% block content %}
+<div class="clients-page">
+    <!-- Header Actions -->
+    <div class="page-header">
+        <div class="header-actions">
+            <button class="btn btn-primary" onclick="showCreateClientModal()">
+                <i class="fas fa-plus"></i> Create Client
+            </button>
+            <button class="btn btn-secondary" onclick="refreshClients()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Clients Table -->
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Server</th>
+                    <th>User</th>
+                    <th>IP Address</th>
+                    <th>Bandwidth Used</th>
+                    <th>Status</th>
+                    <th>Last Connected</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="clientsTable">
+                <!-- Clients will be loaded here -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Loading State -->
+    <div class="loading-state" id="loadingState" style="display: none;">
+        <div class="spinner"></div>
+        <p>Loading clients...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state" id="emptyState" style="display: none;">
+        <i class="fas fa-users"></i>
+        <h3>No clients found</h3>
+        <p>Create your first VPN client to get started.</p>
+        <button class="btn btn-primary" onclick="showCreateClientModal()">
+            <i class="fas fa-plus"></i> Create Client
+        </button>
+    </div>
+</div>
+
+<!-- Create Client Modal -->
+<div id="createClientModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Create New Client</h3>
+            <span class="close">&times;</span>
+        </div>
+        <form id="createClientForm">
+            <div class="form-group">
+                <label for="clientName">Client Name *</label>
+                <input type="text" id="clientName" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="clientServer">Server *</label>
+                <select id="clientServer" name="server_id" required>
+                    <option value="">Select a server</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="clientUser">User *</label>
+                <select id="clientUser" name="user_id" required>
+                    <option value="">Select a user</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="clientBandwidth">Bandwidth Limit (MB) *</label>
+                <input type="number" id="clientBandwidth" name="bandwidth_limit" min="1" required>
+            </div>
+            <div class="form-group">
+                <label for="clientExpireDate">Expire Date (optional)</label>
+                <input type="datetime-local" id="clientExpireDate" name="expire_date">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('createClientModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Client</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Client Details Modal -->
+<div id="clientDetailsModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Client Details</h3>
+            <span class="close">&times;</span>
+        </div>
+        <div id="clientDetailsContent">
+            <!-- Client details will be loaded here -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let clients = [];
+let servers = [];
+let users = [];
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadClients();
+    loadServers();
+    loadUsers();
+});
+
+async function loadClients() {
+    showLoading();
+    
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+
+        const response = await fetch('/api/clients', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            clients = data.clients;
+            renderClients();
+        } else {
+            showError('Failed to load clients');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function loadServers() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/servers', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            servers = data.servers;
+            updateServerSelect();
+        }
+    } catch (error) {
+        console.error('Failed to load servers:', error);
+    }
+}
+
+async function loadUsers() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/users', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            users = data.users;
+            updateUserSelect();
+        }
+    } catch (error) {
+        console.error('Failed to load users:', error);
+    }
+}
+
+function updateServerSelect() {
+    const select = document.getElementById('clientServer');
+    select.innerHTML = '<option value="">Select a server</option>';
+    servers.forEach(server => {
+        select.innerHTML += `<option value="${server.id}">${server.name} (${server.protocol})</option>`;
+    });
+}
+
+function updateUserSelect() {
+    const select = document.getElementById('clientUser');
+    select.innerHTML = '<option value="">Select a user</option>';
+    users.forEach(user => {
+        select.innerHTML += `<option value="${user.id}">${user.username} (${user.role})</option>`;
+    });
+}
+
+function renderClients() {
+    const tbody = document.getElementById('clientsTable');
+    const emptyState = document.getElementById('emptyState');
+    
+    if (clients.length === 0) {
+        tbody.style.display = 'none';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    tbody.style.display = 'table-row-group';
+    emptyState.style.display = 'none';
+    
+    tbody.innerHTML = clients.map(client => `
+        <tr>
+            <td>${client.name}</td>
+            <td>${getServerName(client.server_id)}</td>
+            <td>${getUserName(client.user_id)}</td>
+            <td>${client.allowed_ips}</td>
+            <td>${formatBytes(client.bandwidth_used)} / ${formatBytes(client.bandwidth_limit)}</td>
+            <td><span class="badge badge-${client.status === 'active' ? 'success' : 'danger'}">${client.status}</span></td>
+            <td>${client.last_connected ? formatDate(client.last_connected) : 'Never'}</td>
+            <td>
+                <button class="btn btn-sm btn-info" onclick="viewClientDetails('${client.id}')">Details</button>
+                <button class="btn btn-sm btn-warning" onclick="resetBandwidth('${client.id}')">Reset BW</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteClient('${client.id}')">Delete</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function getServerName(serverId) {
+    const server = servers.find(s => s.id === serverId);
+    return server ? server.name : 'Unknown';
+}
+
+function getUserName(userId) {
+    const user = users.find(u => u.id === userId);
+    return user ? user.username : 'Unknown';
+}
+
+async function viewClientDetails(clientId) {
+    const client = clients.find(c => c.id === clientId);
+    if (!client) return;
+    
+    const content = document.getElementById('clientDetailsContent');
+    content.innerHTML = `
+        <div class="client-details-full">
+            <div class="detail-row">
+                <span class="label">Name:</span>
+                <span class="value">${client.name}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Server:</span>
+                <span class="value">${getServerName(client.server_id)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">User:</span>
+                <span class="value">${getUserName(client.user_id)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">IP Address:</span>
+                <span class="value">${client.allowed_ips}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Bandwidth Used:</span>
+                <span class="value">${formatBytes(client.bandwidth_used)} / ${formatBytes(client.bandwidth_limit)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Status:</span>
+                <span class="value">${client.status}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Created:</span>
+                <span class="value">${formatDate(client.created_at)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Last Connected:</span>
+                <span class="value">${client.last_connected ? formatDate(client.last_connected) : 'Never'}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Expire Date:</span>
+                <span class="value">${client.expire_date ? formatDate(client.expire_date) : 'No expiration'}</span>
+            </div>
+        </div>
+    `;
+    
+    showModal('clientDetailsModal');
+}
+
+async function resetBandwidth(clientId) {
+    if (!confirm('Are you sure you want to reset bandwidth usage for this client?')) {
+        return;
+    }
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/clients/${clientId}/reset-bandwidth`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            showNotification('Bandwidth reset successfully', 'success');
+            loadClients(); // Refresh the list
+        } else {
+            showError('Failed to reset bandwidth');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+async function deleteClient(clientId) {
+    if (!confirm('Are you sure you want to delete this client?')) {
+        return;
+    }
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/clients/${clientId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            showNotification('Client deleted successfully', 'success');
+            loadClients(); // Refresh the list
+        } else {
+            showError('Failed to delete client');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+// Form submission
+document.getElementById('createClientForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const clientData = {
+        name: formData.get('name'),
+        server_id: formData.get('server_id'),
+        user_id: formData.get('user_id'),
+        bandwidth_limit: parseInt(formData.get('bandwidth_limit')) * 1024 * 1024, // Convert MB to bytes
+        expire_date: formData.get('expire_date') ? new Date(formData.get('expire_date')).toISOString() : null
+    };
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/clients', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(clientData)
+        });
+        
+        if (response.ok) {
+            showNotification('Client created successfully', 'success');
+            closeModal('createClientModal');
+            e.target.reset();
+            loadClients(); // Refresh the list
+        } else {
+            const errorData = await response.json();
+            showError(errorData.detail || 'Failed to create client');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+});
+
+// Utility functions
+function showCreateClientModal() {
+    showModal('createClientModal');
+}
+
+function refreshClients() {
+    loadClients();
+}
+
+function showLoading() {
+    document.getElementById('loadingState').style.display = 'block';
+    document.getElementById('clientsTable').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'none';
+}
+
+function hideLoading() {
+    document.getElementById('loadingState').style.display = 'none';
+}
+
+function showError(message) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, 'error');
+    } else {
+        alert(message);
+    }
+}
+
+function showNotification(message, type) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, type);
+    } else {
+        alert(message);
+    }
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+}
+</script>
+{% endblock %} 

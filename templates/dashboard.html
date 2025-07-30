@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - VPN Panel{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-server"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="totalServers">0</h3>
+                <p>Total Servers</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="totalClients">0</h3>
+                <p>Total Clients</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-user"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="totalUsers">0</h3>
+                <p>Total Users</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-signal"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="activeConnections">0</h3>
+                <p>Active Connections</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="quick-actions">
+        <h2>Quick Actions</h2>
+        <div class="action-buttons">
+            <button class="btn btn-primary" onclick="createServer()">
+                <i class="fas fa-plus"></i> Create Server
+            </button>
+            <button class="btn btn-success" onclick="createClient()">
+                <i class="fas fa-user-plus"></i> Create Client
+            </button>
+            {% if user.role.value == 'admin' %}
+            <button class="btn btn-info" onclick="createUser()">
+                <i class="fas fa-user-cog"></i> Create User
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Recent Servers -->
+    <div class="recent-servers">
+        <h2>Recent Servers</h2>
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Protocol</th>
+                        <th>Port</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="serversTable">
+                    <!-- Servers will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- System Status -->
+    <div class="system-status">
+        <h2>System Status</h2>
+        <div class="status-grid">
+            <div class="status-item">
+                <span class="status-label">Database:</span>
+                <span class="status-value" id="dbStatus">Checking...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">API:</span>
+                <span class="status-value" id="apiStatus">Checking...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Last Update:</span>
+                <span class="status-value" id="lastUpdate">-</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Server Modal -->
+<div id="createServerModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Create New Server</h3>
+            <span class="close">&times;</span>
+        </div>
+        <form id="createServerForm">
+            <div class="form-group">
+                <label for="serverName">Server Name</label>
+                <input type="text" id="serverName" required>
+            </div>
+            <div class="form-group">
+                <label for="serverProtocol">Protocol</label>
+                <select id="serverProtocol" required>
+                    <option value="wireguard">WireGuard</option>
+                    <option value="openvpn">OpenVPN</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="serverPort">Port</label>
+                <input type="number" id="serverPort" min="1024" max="65535" required>
+            </div>
+            <div class="form-group">
+                <label for="serverInterface">Interface (optional)</label>
+                <input type="text" id="serverInterface">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('createServerModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Server</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load dashboard data
+async function loadDashboard() {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+
+        // Load servers
+        const serversResponse = await fetch('/api/servers', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (serversResponse.ok) {
+            const serversData = await serversResponse.json();
+            document.getElementById('totalServers').textContent = serversData.servers.length;
+            updateServersTable(serversData.servers);
+        }
+
+        // Load users (admin only)
+        if ('{{ user.role.value }}' === 'admin') {
+            const usersResponse = await fetch('/api/users', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            
+            if (usersResponse.ok) {
+                const usersData = await usersResponse.json();
+                document.getElementById('totalUsers').textContent = usersData.users.length;
+            }
+        }
+
+        // Check system status
+        checkSystemStatus();
+
+    } catch (error) {
+        console.error('Error loading dashboard:', error);
+    }
+}
+
+function updateServersTable(servers) {
+    const tbody = document.getElementById('serversTable');
+    tbody.innerHTML = '';
+    
+    servers.slice(0, 5).forEach(server => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${server.name}</td>
+            <td><span class="badge badge-${server.protocol === 'wireguard' ? 'primary' : 'success'}">${server.protocol}</span></td>
+            <td>${server.port}</td>
+            <td><span class="badge badge-${server.status === 'running' ? 'success' : 'danger'}">${server.status}</span></td>
+            <td>
+                <button class="btn btn-sm btn-${server.status === 'running' ? 'warning' : 'success'}" onclick="toggleServer('${server.id}', '${server.status}')">
+                    ${server.status === 'running' ? 'Stop' : 'Start'}
+                </button>
+                <button class="btn btn-sm btn-info" onclick="viewServer('${server.id}')">View</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+async function checkSystemStatus() {
+    try {
+        const response = await fetch('/api/health');
+        if (response.ok) {
+            document.getElementById('apiStatus').textContent = 'Online';
+            document.getElementById('apiStatus').className = 'status-value online';
+        } else {
+            document.getElementById('apiStatus').textContent = 'Offline';
+            document.getElementById('apiStatus').className = 'status-value offline';
+        }
+    } catch (error) {
+        document.getElementById('apiStatus').textContent = 'Error';
+        document.getElementById('apiStatus').className = 'status-value error';
+    }
+    
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+}
+
+// Modal functions
+function createServer() {
+    document.getElementById('createServerModal').style.display = 'block';
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+// Form submission
+document.getElementById('createServerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = {
+        name: document.getElementById('serverName').value,
+        protocol: document.getElementById('serverProtocol').value,
+        port: parseInt(document.getElementById('serverPort').value),
+        interface: document.getElementById('serverInterface').value || null
+    };
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/servers', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(formData)
+        });
+        
+        if (response.ok) {
+            alert('Server created successfully!');
+            closeModal('createServerModal');
+            loadDashboard();
+        } else {
+            alert('Failed to create server');
+        }
+    } catch (error) {
+        alert('Error creating server');
+    }
+});
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    if (event.target.classList.contains('modal')) {
+        event.target.style.display = 'none';
+    }
+}
+
+// Initialize dashboard
+document.addEventListener('DOMContentLoaded', loadDashboard);
+
+// Refresh data every 30 seconds
+setInterval(loadDashboard, 30000);
+</script>
+{% endblock %} 

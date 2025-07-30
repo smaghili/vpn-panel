@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+
+{% block title %}Servers - VPN Panel{% endblock %}
+{% block page_title %}Server Management{% endblock %}
+
+{% block content %}
+<div class="servers-page">
+    <!-- Header Actions -->
+    <div class="page-header">
+        <div class="header-actions">
+            <button class="btn btn-primary" onclick="showCreateServerModal()">
+                <i class="fas fa-plus"></i> Create Server
+            </button>
+            <button class="btn btn-secondary" onclick="refreshServers()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Servers Grid -->
+    <div class="servers-grid" id="serversGrid">
+        <!-- Servers will be loaded here -->
+    </div>
+
+    <!-- Loading State -->
+    <div class="loading-state" id="loadingState" style="display: none;">
+        <div class="spinner"></div>
+        <p>Loading servers...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state" id="emptyState" style="display: none;">
+        <i class="fas fa-server"></i>
+        <h3>No servers found</h3>
+        <p>Create your first VPN server to get started.</p>
+        <button class="btn btn-primary" onclick="showCreateServerModal()">
+            <i class="fas fa-plus"></i> Create Server
+        </button>
+    </div>
+</div>
+
+<!-- Create Server Modal -->
+<div id="createServerModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Create New Server</h3>
+            <span class="close">&times;</span>
+        </div>
+        <form id="createServerForm">
+            <div class="form-group">
+                <label for="serverName">Server Name *</label>
+                <input type="text" id="serverName" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="serverProtocol">Protocol *</label>
+                <select id="serverProtocol" name="protocol" required>
+                    <option value="wireguard">WireGuard</option>
+                    <option value="openvpn">OpenVPN</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="serverPort">Port *</label>
+                <input type="number" id="serverPort" name="port" min="1024" max="65535" required>
+            </div>
+            <div class="form-group">
+                <label for="serverInterface">Interface (optional)</label>
+                <input type="text" id="serverInterface" name="interface">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('createServerModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Server</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Server Details Modal -->
+<div id="serverDetailsModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Server Details</h3>
+            <span class="close">&times;</span>
+        </div>
+        <div id="serverDetailsContent">
+            <!-- Server details will be loaded here -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let servers = [];
+
+// Load servers on page load
+document.addEventListener('DOMContentLoaded', loadServers);
+
+async function loadServers() {
+    showLoading();
+    
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+
+        const response = await fetch('/api/servers', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            servers = data.servers;
+            renderServers();
+        } else {
+            showError('Failed to load servers');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    } finally {
+        hideLoading();
+    }
+}
+
+function renderServers() {
+    const grid = document.getElementById('serversGrid');
+    const emptyState = document.getElementById('emptyState');
+    
+    if (servers.length === 0) {
+        grid.style.display = 'none';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    grid.style.display = 'grid';
+    emptyState.style.display = 'none';
+    
+    grid.innerHTML = servers.map(server => `
+        <div class="server-card">
+            <div class="server-header">
+                <div class="server-info">
+                    <h3>${server.name}</h3>
+                    <span class="badge badge-${server.protocol === 'wireguard' ? 'primary' : 'success'}">${server.protocol}</span>
+                </div>
+                <div class="server-status">
+                    <span class="status-indicator ${server.status === 'running' ? 'running' : 'stopped'}"></span>
+                    <span class="status-text">${server.status}</span>
+                </div>
+            </div>
+            <div class="server-details">
+                <div class="detail-item">
+                    <span class="label">Port:</span>
+                    <span class="value">${server.port}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="label">Interface:</span>
+                    <span class="value">${server.interface}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="label">Created:</span>
+                    <span class="value">${formatDate(server.created_at)}</span>
+                </div>
+            </div>
+            <div class="server-actions">
+                <button class="btn btn-sm btn-${server.status === 'running' ? 'warning' : 'success'}" 
+                        onclick="toggleServer('${server.id}', '${server.status}')">
+                    ${server.status === 'running' ? 'Stop' : 'Start'}
+                </button>
+                <button class="btn btn-sm btn-info" onclick="viewServerDetails('${server.id}')">
+                    Details
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteServer('${server.id}')">
+                    Delete
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function toggleServer(serverId, currentStatus) {
+    const action = currentStatus === 'running' ? 'stop' : 'start';
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/servers/${serverId}/${action}`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            showNotification(`Server ${action}ed successfully`, 'success');
+            loadServers(); // Refresh the list
+        } else {
+            showError(`Failed to ${action} server`);
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+async function viewServerDetails(serverId) {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/servers/${serverId}`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const server = await response.json();
+            showServerDetails(server);
+        } else {
+            showError('Failed to load server details');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+function showServerDetails(server) {
+    const content = document.getElementById('serverDetailsContent');
+    content.innerHTML = `
+        <div class="server-details-full">
+            <div class="detail-row">
+                <span class="label">Name:</span>
+                <span class="value">${server.name}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Protocol:</span>
+                <span class="value">${server.protocol}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Port:</span>
+                <span class="value">${server.port}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Interface:</span>
+                <span class="value">${server.interface}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Status:</span>
+                <span class="value">${server.status}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Created:</span>
+                <span class="value">${formatDate(server.created_at)}</span>
+            </div>
+        </div>
+    `;
+    
+    showModal('serverDetailsModal');
+}
+
+async function deleteServer(serverId) {
+    if (!confirm('Are you sure you want to delete this server?')) {
+        return;
+    }
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/servers/${serverId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            showNotification('Server deleted successfully', 'success');
+            loadServers(); // Refresh the list
+        } else {
+            showError('Failed to delete server');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+// Form submission
+document.getElementById('createServerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const serverData = {
+        name: formData.get('name'),
+        protocol: formData.get('protocol'),
+        port: parseInt(formData.get('port')),
+        interface: formData.get('interface') || null
+    };
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/servers', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(serverData)
+        });
+        
+        if (response.ok) {
+            showNotification('Server created successfully', 'success');
+            closeModal('createServerModal');
+            e.target.reset();
+            loadServers(); // Refresh the list
+        } else {
+            const errorData = await response.json();
+            showError(errorData.detail || 'Failed to create server');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+});
+
+// Utility functions
+function showCreateServerModal() {
+    showModal('createServerModal');
+}
+
+function refreshServers() {
+    loadServers();
+}
+
+function showLoading() {
+    document.getElementById('loadingState').style.display = 'block';
+    document.getElementById('serversGrid').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'none';
+}
+
+function hideLoading() {
+    document.getElementById('loadingState').style.display = 'none';
+}
+
+function showError(message) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, 'error');
+    } else {
+        alert(message);
+    }
+}
+
+function showNotification(message, type) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, type);
+    } else {
+        alert(message);
+    }
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+}
+</script>
+{% endblock %} 

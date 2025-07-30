@@ -1,0 +1,493 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - VPN Panel{% endblock %}
+{% block page_title %}System Settings{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+    <div class="settings-container">
+        <!-- General Settings -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-cog"></i> General Settings</h3>
+            </div>
+            <form id="generalSettingsForm" class="settings-form">
+                <div class="form-group">
+                    <label for="panelTitle">Panel Title</label>
+                    <input type="text" id="panelTitle" name="panel_title" value="VPN Panel">
+                </div>
+                <div class="form-group">
+                    <label for="defaultBandwidth">Default Bandwidth Limit (MB)</label>
+                    <input type="number" id="defaultBandwidth" name="default_bandwidth" value="1024" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="sessionTimeout">Session Timeout (minutes)</label>
+                    <input type="number" id="sessionTimeout" name="session_timeout" value="30" min="5" max="1440">
+                </div>
+                <div class="form-group">
+                    <label for="maxClientsPerUser">Max Clients Per User</label>
+                    <input type="number" id="maxClientsPerUser" name="max_clients_per_user" value="5" min="1">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save General Settings</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Security Settings -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-shield-alt"></i> Security Settings</h3>
+            </div>
+            <form id="securitySettingsForm" class="settings-form">
+                <div class="form-group">
+                    <label for="passwordMinLength">Minimum Password Length</label>
+                    <input type="number" id="passwordMinLength" name="password_min_length" value="6" min="4" max="20">
+                </div>
+                <div class="form-group">
+                    <label for="requireStrongPassword">Require Strong Password</label>
+                    <select id="requireStrongPassword" name="require_strong_password">
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="maxLoginAttempts">Max Login Attempts</label>
+                    <input type="number" id="maxLoginAttempts" name="max_login_attempts" value="5" min="1" max="10">
+                </div>
+                <div class="form-group">
+                    <label for="lockoutDuration">Lockout Duration (minutes)</label>
+                    <input type="number" id="lockoutDuration" name="lockout_duration" value="15" min="1" max="1440">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Security Settings</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- VPN Settings -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-network-wired"></i> VPN Settings</h3>
+            </div>
+            <form id="vpnSettingsForm" class="settings-form">
+                <div class="form-group">
+                    <label for="wireguardPort">Default WireGuard Port</label>
+                    <input type="number" id="wireguardPort" name="wireguard_port" value="51820" min="1024" max="65535">
+                </div>
+                <div class="form-group">
+                    <label for="openvpnPort">Default OpenVPN Port</label>
+                    <input type="number" id="openvpnPort" name="openvpn_port" value="1194" min="1024" max="65535">
+                </div>
+                <div class="form-group">
+                    <label for="vpnSubnet">VPN Subnet</label>
+                    <input type="text" id="vpnSubnet" name="vpn_subnet" value="10.0.0.0/24">
+                </div>
+                <div class="form-group">
+                    <label for="dnsServers">DNS Servers</label>
+                    <input type="text" id="dnsServers" name="dns_servers" value="8.8.8.8,8.8.4.4">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save VPN Settings</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Backup & Restore -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-database"></i> Backup & Restore</h3>
+            </div>
+            <div class="backup-actions">
+                <button class="btn btn-success" onclick="createBackup()">
+                    <i class="fas fa-download"></i> Create Backup
+                </button>
+                <button class="btn btn-warning" onclick="showRestoreModal()">
+                    <i class="fas fa-upload"></i> Restore Backup
+                </button>
+                <button class="btn btn-info" onclick="showBackupHistory()">
+                    <i class="fas fa-history"></i> Backup History
+                </button>
+            </div>
+        </div>
+
+        <!-- System Information -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-info-circle"></i> System Information</h3>
+            </div>
+            <div class="system-info">
+                <div class="info-row">
+                    <span class="label">Panel Version:</span>
+                    <span class="value">1.0.0</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Python Version:</span>
+                    <span class="value" id="pythonVersion">Loading...</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Database Size:</span>
+                    <span class="value" id="dbSize">Loading...</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Uptime:</span>
+                    <span class="value" id="uptime">Loading...</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Memory Usage:</span>
+                    <span class="value" id="memoryUsage">Loading...</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Disk Usage:</span>
+                    <span class="value" id="diskUsage">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Maintenance -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-tools"></i> Maintenance</h3>
+            </div>
+            <div class="maintenance-actions">
+                <button class="btn btn-warning" onclick="clearExpiredClients()">
+                    <i class="fas fa-trash"></i> Clear Expired Clients
+                </button>
+                <button class="btn btn-info" onclick="optimizeDatabase()">
+                    <i class="fas fa-database"></i> Optimize Database
+                </button>
+                <button class="btn btn-danger" onclick="clearLogs()">
+                    <i class="fas fa-broom"></i> Clear Logs
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Restore Backup Modal -->
+<div id="restoreBackupModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Restore Backup</h3>
+            <span class="close">&times;</span>
+        </div>
+        <form id="restoreBackupForm">
+            <div class="form-group">
+                <label for="backupFile">Select Backup File</label>
+                <input type="file" id="backupFile" name="backup_file" accept=".zip,.tar.gz" required>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="confirmRestore" required>
+                    I understand this will overwrite current data
+                </label>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('restoreBackupModal')">Cancel</button>
+                <button type="submit" class="btn btn-warning">Restore Backup</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load system info on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadSystemInfo();
+    loadSettings();
+});
+
+async function loadSystemInfo() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/system/info', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('pythonVersion').textContent = data.python_version;
+            document.getElementById('dbSize').textContent = data.db_size;
+            document.getElementById('uptime').textContent = data.uptime;
+            document.getElementById('memoryUsage').textContent = data.memory_usage;
+            document.getElementById('diskUsage').textContent = data.disk_usage;
+        }
+    } catch (error) {
+        console.error('Failed to load system info:', error);
+    }
+}
+
+async function loadSettings() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/settings', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const settings = await response.json();
+            populateSettingsForm(settings);
+        }
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+    }
+}
+
+function populateSettingsForm(settings) {
+    // General settings
+    if (settings.general) {
+        document.getElementById('panelTitle').value = settings.general.panel_title || 'VPN Panel';
+        document.getElementById('defaultBandwidth').value = settings.general.default_bandwidth || 1024;
+        document.getElementById('sessionTimeout').value = settings.general.session_timeout || 30;
+        document.getElementById('maxClientsPerUser').value = settings.general.max_clients_per_user || 5;
+    }
+    
+    // Security settings
+    if (settings.security) {
+        document.getElementById('passwordMinLength').value = settings.security.password_min_length || 6;
+        document.getElementById('requireStrongPassword').value = settings.security.require_strong_password || 'false';
+        document.getElementById('maxLoginAttempts').value = settings.security.max_login_attempts || 5;
+        document.getElementById('lockoutDuration').value = settings.security.lockout_duration || 15;
+    }
+    
+    // VPN settings
+    if (settings.vpn) {
+        document.getElementById('wireguardPort').value = settings.vpn.wireguard_port || 51820;
+        document.getElementById('openvpnPort').value = settings.vpn.openvpn_port || 1194;
+        document.getElementById('vpnSubnet').value = settings.vpn.vpn_subnet || '10.0.0.0/24';
+        document.getElementById('dnsServers').value = settings.vpn.dns_servers || '8.8.8.8,8.8.4.4';
+    }
+}
+
+// Form submissions
+document.getElementById('generalSettingsForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await saveSettings('general', new FormData(e.target));
+});
+
+document.getElementById('securitySettingsForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await saveSettings('security', new FormData(e.target));
+});
+
+document.getElementById('vpnSettingsForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await saveSettings('vpn', new FormData(e.target));
+});
+
+async function saveSettings(category, formData) {
+    const settings = {};
+    for (let [key, value] of formData.entries()) {
+        settings[key] = value;
+    }
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/settings/${category}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(settings)
+        });
+        
+        if (response.ok) {
+            showNotification(`${category} settings saved successfully`, 'success');
+        } else {
+            showError('Failed to save settings');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+// Backup functions
+async function createBackup() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/backup/create', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `vpn-panel-backup-${new Date().toISOString().split('T')[0]}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            showNotification('Backup created successfully', 'success');
+        } else {
+            showError('Failed to create backup');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+function showRestoreModal() {
+    showModal('restoreBackupModal');
+}
+
+async function showBackupHistory() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/backup/history', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const backups = await response.json();
+            const history = backups.map(backup => 
+                `${backup.filename} - ${new Date(backup.created_at).toLocaleString()} (${backup.size})`
+            ).join('\n');
+            alert('Backup History:\n\n' + history);
+        } else {
+            showError('Failed to load backup history');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+// Maintenance functions
+async function clearExpiredClients() {
+    if (!confirm('Are you sure you want to clear all expired clients?')) {
+        return;
+    }
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/maintenance/clear-expired-clients', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(`Cleared ${result.count} expired clients`, 'success');
+        } else {
+            showError('Failed to clear expired clients');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+async function optimizeDatabase() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/maintenance/optimize-database', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            showNotification('Database optimized successfully', 'success');
+        } else {
+            showError('Failed to optimize database');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+async function clearLogs() {
+    if (!confirm('Are you sure you want to clear all logs?')) {
+        return;
+    }
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/maintenance/clear-logs', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            showNotification('Logs cleared successfully', 'success');
+        } else {
+            showError('Failed to clear logs');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+// Restore backup form
+document.getElementById('restoreBackupForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const file = formData.get('backup_file');
+    
+    if (!file) {
+        showError('Please select a backup file');
+        return;
+    }
+    
+    try {
+        const token = localStorage.getItem('token');
+        const uploadData = new FormData();
+        uploadData.append('backup_file', file);
+        
+        const response = await fetch('/api/backup/restore', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            body: uploadData
+        });
+        
+        if (response.ok) {
+            showNotification('Backup restored successfully', 'success');
+            closeModal('restoreBackupModal');
+            e.target.reset();
+        } else {
+            const errorData = await response.json();
+            showError(errorData.detail || 'Failed to restore backup');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+});
+
+// Utility functions
+function showError(message) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, 'error');
+    } else {
+        alert(message);
+    }
+}
+
+function showNotification(message, type) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, type);
+    } else {
+        alert(message);
+    }
+}
+</script>
+{% endblock %} 

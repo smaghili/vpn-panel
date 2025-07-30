@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - VPN Panel{% endblock %}
+{% block page_title %}My Profile{% endblock %}
+
+{% block content %}
+<div class="profile-page">
+    <div class="profile-container">
+        <!-- Profile Info -->
+        <div class="profile-section">
+            <div class="section-header">
+                <h3><i class="fas fa-user"></i> Profile Information</h3>
+            </div>
+            <div class="profile-info">
+                <div class="info-row">
+                    <span class="label">Username:</span>
+                    <span class="value" id="profileUsername">{{ user.username }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Email:</span>
+                    <span class="value" id="profileEmail">{{ user.email }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Role:</span>
+                    <span class="value">
+                        <span class="badge badge-{{ 'danger' if user.role.value == 'admin' else 'primary' }}" id="profileRole">
+                            {{ user.role.value }}
+                        </span>
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Status:</span>
+                    <span class="value">
+                        <span class="badge badge-{{ 'success' if user.status.value == 'active' else 'danger' }}" id="profileStatus">
+                            {{ user.status.value }}
+                        </span>
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Last Login:</span>
+                    <span class="value" id="profileLastLogin">
+                        {{ user.last_login.strftime('%Y-%m-%d %H:%M:%S') if user.last_login else 'Never' }}
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Account Created:</span>
+                    <span class="value" id="profileCreated">
+                        {{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Expire Date:</span>
+                    <span class="value" id="profileExpire">
+                        {{ user.expire_date.strftime('%Y-%m-%d %H:%M:%S') if user.expire_date else 'No expiration' }}
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- My Clients -->
+        <div class="profile-section">
+            <div class="section-header">
+                <h3><i class="fas fa-users"></i> My VPN Clients</h3>
+                <button class="btn btn-primary btn-sm" onclick="refreshMyClients()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="clients-list" id="myClientsList">
+                <!-- Clients will be loaded here -->
+            </div>
+            <div class="loading-state" id="clientsLoadingState" style="display: none;">
+                <div class="spinner"></div>
+                <p>Loading your clients...</p>
+            </div>
+            <div class="empty-state" id="clientsEmptyState" style="display: none;">
+                <i class="fas fa-users"></i>
+                <h3>No clients found</h3>
+                <p>You don't have any VPN clients yet.</p>
+            </div>
+        </div>
+
+        <!-- Change Password -->
+        <div class="profile-section">
+            <div class="section-header">
+                <h3><i class="fas fa-lock"></i> Change Password</h3>
+            </div>
+            <form id="changePasswordForm" class="profile-form">
+                <div class="form-group">
+                    <label for="currentPassword">Current Password *</label>
+                    <input type="password" id="currentPassword" name="current_password" required>
+                </div>
+                <div class="form-group">
+                    <label for="newPassword">New Password *</label>
+                    <input type="password" id="newPassword" name="new_password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm New Password *</label>
+                    <input type="password" id="confirmPassword" name="confirm_password" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Change Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let myClients = [];
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadMyClients();
+});
+
+async function loadMyClients() {
+    showClientsLoading();
+    
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+
+        const response = await fetch('/api/clients', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            myClients = data.clients;
+            renderMyClients();
+        } else {
+            showError('Failed to load your clients');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    } finally {
+        hideClientsLoading();
+    }
+}
+
+function renderMyClients() {
+    const list = document.getElementById('myClientsList');
+    const emptyState = document.getElementById('clientsEmptyState');
+    
+    if (myClients.length === 0) {
+        list.style.display = 'none';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    list.style.display = 'block';
+    emptyState.style.display = 'none';
+    
+    list.innerHTML = myClients.map(client => `
+        <div class="client-item">
+            <div class="client-info">
+                <div class="client-name">${client.name}</div>
+                <div class="client-details">
+                    <span class="detail">IP: ${client.allowed_ips}</span>
+                    <span class="detail">Bandwidth: ${formatBytes(client.bandwidth_used)} / ${formatBytes(client.bandwidth_limit)}</span>
+                    <span class="detail">Status: <span class="badge badge-${client.status === 'active' ? 'success' : 'danger'}">${client.status}</span></span>
+                </div>
+            </div>
+            <div class="client-actions">
+                <button class="btn btn-sm btn-info" onclick="downloadClientConfig('${client.id}')">Download Config</button>
+                <button class="btn btn-sm btn-warning" onclick="viewClientDetails('${client.id}')">Details</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function downloadClientConfig(clientId) {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/clients/${clientId}/config`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `vpn-config-${clientId}.conf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            showNotification('Configuration downloaded successfully', 'success');
+        } else {
+            showError('Failed to download configuration');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+}
+
+function viewClientDetails(clientId) {
+    const client = myClients.find(c => c.id === clientId);
+    if (!client) return;
+    
+    const details = `
+        <div class="client-details-full">
+            <div class="detail-row">
+                <span class="label">Name:</span>
+                <span class="value">${client.name}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">IP Address:</span>
+                <span class="value">${client.allowed_ips}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Bandwidth Used:</span>
+                <span class="value">${formatBytes(client.bandwidth_used)} / ${formatBytes(client.bandwidth_limit)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Status:</span>
+                <span class="value">${client.status}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Created:</span>
+                <span class="value">${formatDate(client.created_at)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Last Connected:</span>
+                <span class="value">${client.last_connected ? formatDate(client.last_connected) : 'Never'}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Expire Date:</span>
+                <span class="value">${client.expire_date ? formatDate(client.expire_date) : 'No expiration'}</span>
+            </div>
+        </div>
+    `;
+    
+    // Show in a modal or alert
+    alert(details.replace(/<[^>]*>/g, '')); // Simple alert for now
+}
+
+// Change password form
+document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const currentPassword = formData.get('current_password');
+    const newPassword = formData.get('new_password');
+    const confirmPassword = formData.get('confirm_password');
+    
+    if (newPassword !== confirmPassword) {
+        showError('New passwords do not match');
+        return;
+    }
+    
+    if (newPassword.length < 6) {
+        showError('New password must be at least 6 characters long');
+        return;
+    }
+    
+    const passwordData = {
+        current_password: currentPassword,
+        new_password: newPassword
+    };
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/users/me/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(passwordData)
+        });
+        
+        if (response.ok) {
+            showNotification('Password changed successfully', 'success');
+            e.target.reset();
+        } else {
+            const errorData = await response.json();
+            showError(errorData.detail || 'Failed to change password');
+        }
+    } catch (error) {
+        showError('Network error occurred');
+    }
+});
+
+// Utility functions
+function refreshMyClients() {
+    loadMyClients();
+}
+
+function showClientsLoading() {
+    document.getElementById('clientsLoadingState').style.display = 'block';
+    document.getElementById('myClientsList').style.display = 'none';
+    document.getElementById('clientsEmptyState').style.display = 'none';
+}
+
+function hideClientsLoading() {
+    document.getElementById('clientsLoadingState').style.display = 'none';
+}
+
+function showError(message) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, 'error');
+    } else {
+        alert(message);
+    }
+}
+
+function showNotification(message, type) {
+    if (window.VPNPanel && window.VPNPanel.showNotification) {
+        window.VPNPanel.showNotification(message, type);
+    } else {
+        alert(message);
+    }
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+}
+</script>
+{% endblock %} 

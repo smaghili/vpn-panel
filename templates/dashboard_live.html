@@ -1,0 +1,610 @@
+{% extends "base.html" %}
+
+{% block title %}Live Dashboard - VPN Panel{% endblock %}
+
+{% block content %}
+<div class="dashboard-live">
+    <div class="dashboard-header">
+        <h1><i class="fas fa-tachometer-alt"></i> Live Dashboard</h1>
+        <div class="connection-status">
+            <span id="ws-status" class="status-indicator offline">Offline</span>
+            <span id="last-update">Last update: Never</span>
+        </div>
+    </div>
+
+    <!-- Real-time Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-server"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="active-servers">0</h3>
+                <p>Active Servers</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="active-clients">0</h3>
+                <p>Active Clients</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-network-wired"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="total-traffic">0 MB</h3>
+                <p>Total Traffic</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <div class="stat-content">
+                <h3 id="bandwidth-usage">0 Mbps</h3>
+                <p>Current Bandwidth</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Real-time Traffic Chart -->
+    <div class="chart-container">
+        <div class="chart-header">
+            <h2>Real-time Traffic</h2>
+            <div class="chart-controls">
+                <button id="chart-toggle" class="btn btn-secondary">Pause</button>
+                <select id="chart-period">
+                    <option value="1h">Last Hour</option>
+                    <option value="6h">Last 6 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                </select>
+            </div>
+        </div>
+        <canvas id="traffic-chart" width="800" height="300"></canvas>
+    </div>
+
+    <!-- Live Server Status -->
+    <div class="servers-live">
+        <h2>Server Status</h2>
+        <div id="servers-grid" class="servers-grid">
+            <!-- Server cards will be populated dynamically -->
+        </div>
+    </div>
+
+    <!-- Live Client Activity -->
+    <div class="clients-live">
+        <h2>Client Activity</h2>
+        <div class="table-container">
+            <table id="clients-table" class="data-table">
+                <thead>
+                    <tr>
+                        <th>Client</th>
+                        <th>Server</th>
+                        <th>Status</th>
+                        <th>Traffic</th>
+                        <th>Bandwidth</th>
+                        <th>Connected Since</th>
+                    </tr>
+                </thead>
+                <tbody id="clients-tbody">
+                    <!-- Client rows will be populated dynamically -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- System Alerts -->
+    <div class="alerts-container">
+        <h2>System Alerts</h2>
+        <div id="alerts-list" class="alerts-list">
+            <!-- Alerts will be populated dynamically -->
+        </div>
+    </div>
+</div>
+
+<!-- WebSocket Connection -->
+<script>
+let ws = null;
+let chart = null;
+let chartData = {
+    labels: [],
+    datasets: [{
+        label: 'Download (Mbps)',
+        data: [],
+        borderColor: 'rgb(75, 192, 192)',
+        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+        tension: 0.1
+    }, {
+        label: 'Upload (Mbps)',
+        data: [],
+        borderColor: 'rgb(255, 99, 132)',
+        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+        tension: 0.1
+    }]
+};
+
+// Initialize WebSocket connection
+function initWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/dashboard`;
+    
+    ws = new WebSocket(wsUrl);
+    
+    ws.onopen = function() {
+        console.log('WebSocket connected');
+        updateConnectionStatus('online');
+        
+        // Send authentication
+        const token = localStorage.getItem('authToken');
+        if (token) {
+            ws.send(JSON.stringify({
+                type: 'auth',
+                token: token
+            }));
+        }
+    };
+    
+    ws.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        handleWebSocketMessage(data);
+    };
+    
+    ws.onclose = function() {
+        console.log('WebSocket disconnected');
+        updateConnectionStatus('offline');
+        
+        // Reconnect after 5 seconds
+        setTimeout(initWebSocket, 5000);
+    };
+    
+    ws.onerror = function(error) {
+        console.error('WebSocket error:', error);
+        updateConnectionStatus('error');
+    };
+}
+
+// Handle WebSocket messages
+function handleWebSocketMessage(data) {
+    switch(data.type) {
+        case 'traffic_update':
+            updateTrafficStats(data.data);
+            break;
+        case 'server_status':
+            updateServerStatus(data.data);
+            break;
+        case 'system_alert':
+            showAlert(data.data);
+            break;
+        case 'dashboard_stats':
+            updateDashboardStats(data.data);
+            break;
+    }
+    
+    updateLastUpdate();
+}
+
+// Update connection status
+function updateConnectionStatus(status) {
+    const statusElement = document.getElementById('ws-status');
+    statusElement.className = `status-indicator ${status}`;
+    statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+// Update last update time
+function updateLastUpdate() {
+    const now = new Date();
+    document.getElementById('last-update').textContent = 
+        `Last update: ${now.toLocaleTimeString()}`;
+}
+
+// Update dashboard statistics
+function updateDashboardStats(stats) {
+    document.getElementById('active-servers').textContent = stats.active_servers || 0;
+    document.getElementById('active-clients').textContent = stats.active_clients || 0;
+    document.getElementById('total-traffic').textContent = formatBytes(stats.total_traffic || 0);
+    document.getElementById('bandwidth-usage').textContent = `${stats.current_bandwidth || 0} Mbps`;
+}
+
+// Update traffic statistics
+function updateTrafficStats(trafficData) {
+    // Update chart data
+    const timestamp = new Date(trafficData.timestamp);
+    const downloadMbps = (trafficData.rx_bytes * 8) / (1024 * 1024); // Convert to Mbps
+    const uploadMbps = (trafficData.tx_bytes * 8) / (1024 * 1024);
+    
+    chartData.labels.push(timestamp.toLocaleTimeString());
+    chartData.datasets[0].data.push(downloadMbps);
+    chartData.datasets[1].data.push(uploadMbps);
+    
+    // Keep only last 60 data points
+    if (chartData.labels.length > 60) {
+        chartData.labels.shift();
+        chartData.datasets[0].data.shift();
+        chartData.datasets[1].data.shift();
+    }
+    
+    // Update chart
+    if (chart) {
+        chart.update('none');
+    }
+}
+
+// Update server status
+function updateServerStatus(serverData) {
+    const serversGrid = document.getElementById('servers-grid');
+    const serverId = serverData.server_id;
+    
+    let serverCard = document.getElementById(`server-${serverId}`);
+    if (!serverCard) {
+        serverCard = createServerCard(serverData);
+        serversGrid.appendChild(serverCard);
+    } else {
+        updateServerCard(serverCard, serverData);
+    }
+}
+
+// Create server card
+function createServerCard(serverData) {
+    const card = document.createElement('div');
+    card.className = 'server-card';
+    card.id = `server-${serverData.server_id}`;
+    
+    card.innerHTML = `
+        <div class="server-header">
+            <h3>${serverData.server_id}</h3>
+            <span class="status ${serverData.status}">${serverData.status}</span>
+        </div>
+        <div class="server-stats">
+            <div class="stat">
+                <span class="label">Connections:</span>
+                <span class="value">${serverData.active_connections}</span>
+            </div>
+            <div class="stat">
+                <span class="label">CPU:</span>
+                <span class="value">${serverData.cpu_usage.toFixed(1)}%</span>
+            </div>
+            <div class="stat">
+                <span class="label">Memory:</span>
+                <span class="value">${serverData.memory_usage.toFixed(1)}%</span>
+            </div>
+        </div>
+    `;
+    
+    return card;
+}
+
+// Update server card
+function updateServerCard(card, serverData) {
+    const statusElement = card.querySelector('.status');
+    const connectionsElement = card.querySelector('.stat:nth-child(1) .value');
+    const cpuElement = card.querySelector('.stat:nth-child(2) .value');
+    const memoryElement = card.querySelector('.stat:nth-child(3) .value');
+    
+    statusElement.className = `status ${serverData.status}`;
+    statusElement.textContent = serverData.status;
+    connectionsElement.textContent = serverData.active_connections;
+    cpuElement.textContent = `${serverData.cpu_usage.toFixed(1)}%`;
+    memoryElement.textContent = `${serverData.memory_usage.toFixed(1)}%`;
+}
+
+// Show system alert
+function showAlert(alertData) {
+    const alertsList = document.getElementById('alerts-list');
+    const alertElement = document.createElement('div');
+    alertElement.className = `alert alert-${alertData.severity}`;
+    
+    alertElement.innerHTML = `
+        <div class="alert-header">
+            <span class="alert-type">${alertData.alert_type}</span>
+            <span class="alert-time">${new Date(alertData.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="alert-message">${alertData.message}</div>
+    `;
+    
+    alertsList.insertBefore(alertElement, alertsList.firstChild);
+    
+    // Remove old alerts (keep only last 10)
+    while (alertsList.children.length > 10) {
+        alertsList.removeChild(alertsList.lastChild);
+    }
+}
+
+// Initialize chart
+function initChart() {
+    const ctx = document.getElementById('traffic-chart').getContext('2d');
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Bandwidth (Mbps)'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Time'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: true
+                }
+            }
+        }
+    });
+}
+
+// Utility functions
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Initialize dashboard
+document.addEventListener('DOMContentLoaded', function() {
+    initChart();
+    initWebSocket();
+    
+    // Chart controls
+    document.getElementById('chart-toggle').addEventListener('click', function() {
+        const button = this;
+        if (button.textContent === 'Pause') {
+            button.textContent = 'Resume';
+            // Pause chart updates
+        } else {
+            button.textContent = 'Pause';
+            // Resume chart updates
+        }
+    });
+    
+    document.getElementById('chart-period').addEventListener('change', function() {
+        // Change chart period
+        console.log('Chart period changed to:', this.value);
+    });
+});
+</script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+.dashboard-live {
+    padding: 20px;
+}
+
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+}
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.status-indicator {
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status-indicator.online {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.status-indicator.offline {
+    background-color: #f44336;
+    color: white;
+}
+
+.status-indicator.error {
+    background-color: #ff9800;
+    color: white;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.stat-card {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.stat-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+}
+
+.stat-content h3 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: bold;
+    color: #333;
+}
+
+.stat-content p {
+    margin: 5px 0 0 0;
+    color: #666;
+    font-size: 14px;
+}
+
+.chart-container {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    margin-bottom: 30px;
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.chart-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.servers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.server-card {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.server-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.server-header h3 {
+    margin: 0;
+    color: #333;
+}
+
+.status {
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status.running {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.status.stopped {
+    background-color: #f44336;
+    color: white;
+}
+
+.status.starting {
+    background-color: #ff9800;
+    color: white;
+}
+
+.server-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.stat {
+    text-align: center;
+}
+
+.stat .label {
+    display: block;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.stat .value {
+    display: block;
+    font-size: 16px;
+    font-weight: bold;
+    color: #333;
+}
+
+.alerts-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.alert {
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    border-left: 4px solid;
+}
+
+.alert-info {
+    background-color: #e3f2fd;
+    border-left-color: #2196F3;
+}
+
+.alert-warning {
+    background-color: #fff3e0;
+    border-left-color: #ff9800;
+}
+
+.alert-error {
+    background-color: #ffebee;
+    border-left-color: #f44336;
+}
+
+.alert-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+}
+
+.alert-type {
+    font-weight: bold;
+    color: #333;
+}
+
+.alert-time {
+    font-size: 12px;
+    color: #666;
+}
+
+.alert-message {
+    color: #333;
+}
+</style>
+{% endblock %} 
