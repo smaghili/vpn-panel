@@ -56,12 +56,12 @@ vpn-panel/
 bash <(curl -Ls https://raw.githubusercontent.com/smaghili/vpn-panel/main/install.sh)
 ```
 
-**نکات مهم:**
-- اسکریپت به صورت خودکار تمام وابستگی‌ها را نصب می‌کند
-- از شما پورت، نام کاربری، رمز عبور و ایمیل ادمین را می‌پرسد
-- WireGuard و OpenVPN را به صورت خودکار پیکربندی می‌کند
-- Firewall را برای امنیت تنظیم می‌کند
-- سرویس systemd ایجاد می‌کند
+**Important Notes:**
+- Script automatically installs all dependencies
+- Asks for port, username, and admin password
+- Automatically configures WireGuard and OpenVPN
+- Creates systemd service
+- User must configure firewall manually
 
 ### Manual Install
 ```bash
@@ -243,24 +243,23 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Service Issues
 ```bash
-# بررسی وضعیت سرویس
+# Check service status
 sudo systemctl status vpn-panel
 
-# مشاهده لاگ‌ها
+# View logs
 sudo journalctl -u vpn-panel -f
 
-# راه‌اندازی مجدد
+# Restart service
 sudo systemctl restart vpn-panel
 ```
 
-### Firewall Issues
+### Firewall Configuration
 ```bash
-# بررسی قوانین iptables
-sudo iptables -L -n -v
-
-# بازنشانی firewall
-sudo iptables -F
-sudo iptables -X
+# Configure firewall manually
+sudo ufw allow YOUR_VPN_PANEL_PORT
+sudo ufw allow 51820/udp  # WireGuard
+sudo ufw allow 1194/udp   # OpenVPN
+sudo ufw enable
 ```
 
 ## 🗺️ Roadmap

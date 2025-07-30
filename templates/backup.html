@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backup Management - VPN Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .backup-container {
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .backup-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-card h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .backup-actions {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .backup-actions h2 {
+            margin: 0 0 20px 0;
+            color: #333;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #1e7e34;
+        }
+        
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+        
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .backup-list {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .backup-list h2 {
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            color: #333;
+        }
+        
+        .backup-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .backup-table th,
+        .backup-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .backup-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .backup-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .backup-type {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .backup-type.full {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .backup-type.database {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .backup-type.config {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .backup-actions-cell {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #000;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="backup-container">
+        <h1><i class="fas fa-database"></i> Backup Management</h1>
+        
+        <div id="alert-container"></div>
+        
+        <div class="backup-stats" id="stats-container">
+            <div class="stat-card">
+                <h3>Total Backups</h3>
+                <div class="value" id="total-backups">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Size</h3>
+                <div class="value" id="total-size">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Latest Backup</h3>
+                <div class="value" id="latest-backup">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Storage Used</h3>
+                <div class="value" id="storage-used">-</div>
+            </div>
+        </div>
+        
+        <div class="backup-actions">
+            <h2>Create Backup</h2>
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="createBackup('full')">
+                    <i class="fas fa-database"></i> Full Backup
+                </button>
+                <button class="btn btn-success" onclick="createBackup('database')">
+                    <i class="fas fa-table"></i> Database Only
+                </button>
+                <button class="btn btn-warning" onclick="createBackup('config')">
+                    <i class="fas fa-cogs"></i> Config Only
+                </button>
+                <button class="btn btn-danger" onclick="cleanupBackups()">
+                    <i class="fas fa-trash"></i> Cleanup Old
+                </button>
+            </div>
+        </div>
+        
+        <div class="backup-list">
+            <h2>Backup History</h2>
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Loading backups...</p>
+            </div>
+            <table class="backup-table" id="backup-table" style="display: none;">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                        <th>Size</th>
+                        <th>Created</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="backup-tbody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Restore Modal -->
+    <div id="restoreModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Restore Backup</h3>
+                <span class="close" onclick="closeModal('restoreModal')">&times;</span>
+            </div>
+            <form id="restoreForm">
+                <div class="form-group">
+                    <label>Backup ID:</label>
+                    <input type="text" id="restoreBackupId" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Restore Type:</label>
+                    <select id="restoreType">
+                        <option value="full">Full System</option>
+                        <option value="database">Database Only</option>
+                        <option value="config">Configuration Only</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Confirmation:</label>
+                    <input type="text" id="restoreConfirm" placeholder="Type 'RESTORE' to confirm" required>
+                </div>
+                <div class="action-buttons">
+                    <button type="submit" class="btn btn-danger">Restore</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('restoreModal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        let backups = [];
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            loadBackups();
+            loadStats();
+        });
+        
+        async function loadBackups() {
+            try {
+                showLoading(true);
+                const response = await fetch('/api/admin/backups', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    backups = data.backups;
+                    renderBackups();
+                } else {
+                    showAlert('Failed to load backups', 'error');
+                }
+            } catch (error) {
+                showAlert('Error loading backups', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/admin/backups/stats', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const stats = await response.json();
+                    document.getElementById('total-backups').textContent = stats.total_backups;
+                    document.getElementById('total-size').textContent = `${stats.total_size_mb.toFixed(2)} MB`;
+                    document.getElementById('latest-backup').textContent = stats.newest_backup ? 
+                        new Date(stats.newest_backup).toLocaleDateString() : 'None';
+                    document.getElementById('storage-used').textContent = `${stats.total_size_mb.toFixed(2)} MB`;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+        
+        function renderBackups() {
+            const tbody = document.getElementById('backup-tbody');
+            tbody.innerHTML = '';
+            
+            if (backups.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;">No backups found</td></tr>';
+                return;
+            }
+            
+            backups.forEach(backup => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${backup.backup_id}</td>
+                    <td><span class="backup-type ${backup.type}">${backup.type.toUpperCase()}</span></td>
+                    <td>${backup.description || '-'}</td>
+                    <td>${backup.size_mb.toFixed(2)} MB</td>
+                    <td>${new Date(backup.timestamp).toLocaleString()}</td>
+                    <td><span class="backup-type ${backup.status}">${backup.status}</span></td>
+                    <td class="backup-actions-cell">
+                        <button class="btn btn-sm btn-primary" onclick="downloadBackup('${backup.backup_id}')">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button class="btn btn-sm btn-warning" onclick="showRestoreModal('${backup.backup_id}')">
+                            <i class="fas fa-undo"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteBackup('${backup.backup_id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        async function createBackup(type) {
+            try {
+                const description = prompt(`Enter description for ${type} backup (optional):`);
+                
+                const response = await fetch(`/api/admin/backups/${type}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ description: description || '' })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert(`${type.charAt(0).toUpperCase() + type.slice(1)} backup created successfully`, 'success');
+                    loadBackups();
+                    loadStats();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Backup creation failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Error creating backup', 'error');
+            }
+        }
+        
+        async function downloadBackup(backupId) {
+            try {
+                window.open(`/api/admin/backups/${backupId}/download`, '_blank');
+            } catch (error) {
+                showAlert('Error downloading backup', 'error');
+            }
+        }
+        
+        function showRestoreModal(backupId) {
+            document.getElementById('restoreBackupId').value = backupId;
+            document.getElementById('restoreModal').style.display = 'block';
+        }
+        
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+        
+        document.getElementById('restoreForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const confirmText = document.getElementById('restoreConfirm').value;
+            if (confirmText !== 'RESTORE') {
+                showAlert('Please type RESTORE to confirm', 'error');
+                return;
+            }
+            
+            const backupId = document.getElementById('restoreBackupId').value;
+            const restoreType = document.getElementById('restoreType').value;
+            
+            try {
+                const response = await fetch(`/api/admin/backups/${backupId}/restore`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ restore_type: restoreType })
+                });
+                
+                if (response.ok) {
+                    showAlert('Backup restored successfully', 'success');
+                    closeModal('restoreModal');
+                    loadBackups();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Restore failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Error restoring backup', 'error');
+            }
+        });
+        
+        async function deleteBackup(backupId) {
+            if (!confirm('Are you sure you want to delete this backup?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/admin/backups/${backupId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                
+                if (response.ok) {
+                    showAlert('Backup deleted successfully', 'success');
+                    loadBackups();
+                    loadStats();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Delete failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Error deleting backup', 'error');
+            }
+        }
+        
+        async function cleanupBackups() {
+            const days = prompt('Enter number of days to keep backups (default: 30):', '30');
+            if (!days) return;
+            
+            try {
+                const response = await fetch('/api/admin/backups/cleanup', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ days: parseInt(days) })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                    loadBackups();
+                    loadStats();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Cleanup failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Error cleaning up backups', 'error');
+            }
+        }
+        
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('backup-table').style.display = show ? 'none' : 'table';
+        }
+        
+        function showAlert(message, type) {
+            const container = document.getElementById('alert-container');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            
+            container.appendChild(alert);
+            
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+    </script>
+</body>
+</html> 

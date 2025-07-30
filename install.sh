@@ -124,13 +124,11 @@ install_system_deps() {
     apt-get install -y htop iotop nethogs iftop
     
     # Network tools
-    apt-get install -y net-tools iproute2 iptables iptables-persistent
+    apt-get install -y net-tools iproute2
     
-    # SSL certificates
-    apt-get install -y certbot python3-certbot-nginx
+
     
-    # Web server (optional)
-    apt-get install -y nginx
+
     
     # Additional Python packages
     apt-get install -y python3-psutil python3-redis python3-websockets python3-cryptography
@@ -279,53 +277,44 @@ EOF
     print_success "OpenVPN setup completed"
 }
 
-# Function to setup firewall
-setup_firewall() {
-    print_status "Setting up firewall..."
+# Function to setup security
+setup_security() {
+    print_status "Setting up security features..."
     
-    # Reset iptables
-    iptables -F
-    iptables -X
-    iptables -t nat -F
-    iptables -t nat -X
+    # Create vpn-panel user and group
+    useradd -r -s /bin/false -d /var/lib/vpn-panel vpn-panel 2>/dev/null || true
+    groupadd vpn-panel 2>/dev/null || true
+    usermod -a -G vpn-panel vpn-panel 2>/dev/null || true
     
-    # Set default policies
-    iptables -P INPUT DROP
-    iptables -P FORWARD DROP
-    iptables -P OUTPUT ACCEPT
+    # Set proper permissions
+    chown -R vpn-panel:vpn-panel /var/lib/vpn-panel
+    chown -R vpn-panel:vpn-panel /etc/vpn-panel
+    chown -R vpn-panel:vpn-panel /var/log/vpn-panel
     
-    # Allow loopback
-    iptables -A INPUT -i lo -j ACCEPT
+    # Set restrictive permissions
+    chmod 750 /var/lib/vpn-panel
+    chmod 750 /etc/vpn-panel
+    chmod 750 /var/log/vpn-panel
+    chmod 600 /var/lib/vpn-panel/users.db 2>/dev/null || true
+    chmod 600 /etc/vpn-panel/secrets.json 2>/dev/null || true
     
-    # Allow established connections
-    iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-        
-    # Allow VPN Panel port
-    iptables -A INPUT -p tcp --dport $PORT -j ACCEPT
+    # Setup capabilities for network operations
+    setcap cap_net_admin+ep /sbin/ip 2>/dev/null || true
+    setcap cap_net_admin+ep /sbin/iptables 2>/dev/null || true
+    setcap cap_net_bind_service+ep /var/lib/vpn-panel/venv/bin/python 2>/dev/null || true
     
-    # Allow WireGuard
-    iptables -A INPUT -p udp --dport 51820 -j ACCEPT
+    # Create sudo rules for specific commands
+    cat > /etc/sudoers.d/vpn-panel << EOF
+vpn-panel ALL=(ALL) NOPASSWD: /sbin/iptables
+vpn-panel ALL=(ALL) NOPASSWD: /sbin/ip
+vpn-panel ALL=(ALL) NOPASSWD: /bin/systemctl restart wg-quick@*
+vpn-panel ALL=(ALL) NOPASSWD: /bin/systemctl restart openvpn@*
+vpn-panel ALL=(ALL) NOPASSWD: /bin/systemctl status wg-quick@*
+vpn-panel ALL=(ALL) NOPASSWD: /bin/systemctl status openvpn@*
+EOF
+    chmod 440 /etc/sudoers.d/vpn-panel
     
-    # Allow OpenVPN
-    iptables -A INPUT -p udp --dport 1194 -j ACCEPT
-    
-    # Allow HTTP/HTTPS
-    iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-    iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-    
-    # Allow forwarding for VPN
-    iptables -A FORWARD -i wg0 -j ACCEPT
-    iptables -A FORWARD -o wg0 -j ACCEPT
-    iptables -A FORWARD -i tun0 -j ACCEPT
-    iptables -A FORWARD -o tun0 -j ACCEPT
-    
-    # NAT for VPN
-    iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-    
-    # Save iptables rules
-    iptables-save > /etc/iptables/rules.v4
-    
-    print_success "Firewall configured successfully"
+    print_success "Security setup completed"
 }
 
 # Function to create VPN Panel application
@@ -386,18 +375,22 @@ After=network.target
 
 [Service]
 Type=exec
-User=root
-Group=root
+User=vpn-panel
+Group=vpn-panel
 WorkingDirectory=/var/lib/vpn-panel
 Environment=PATH=/var/lib/vpn-panel/venv/bin
 Environment=PYTHONPATH=/var/lib/vpn-panel/src
-Environment=SECRET_KEY=$(openssl rand -hex 32)
 Environment=DB_PATH=/var/lib/vpn-panel/users.db
 Environment=REDIS_URL=redis://localhost:6379
 Environment=PORT=$PORT
 ExecStart=/var/lib/vpn-panel/venv/bin/python main.py
 Restart=always
 RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vpn-panel /etc/vpn-panel /var/log/vpn-panel
 
 [Install]
 WantedBy=multi-user.target
@@ -450,19 +443,7 @@ EOF
     print_success "VPN Panel application created successfully"
 }
 
-# Function to setup SSL (optional)
-setup_ssl() {
-    print_status "Setting up SSL certificate..."
-    
-    # Check if domain is provided
-    if [ -n "$DOMAIN" ]; then
-        certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email admin@vpn-panel.local
-        print_success "SSL certificate installed for $DOMAIN"
-    else
-        print_warning "No domain provided, skipping SSL setup"
-        print_warning "You can run: certbot --nginx -d yourdomain.com"
-    fi
-}
+
 
 # Function to start services
 start_services() {
@@ -540,7 +521,7 @@ main() {
     setup_python_env
     setup_wireguard
     setup_openvpn
-    setup_firewall
+    setup_security
     create_vpn_panel_app
     start_services
     create_admin_user

@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Dashboard - VPN Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-shield-alt"></i> Security Dashboard</h1>
+            <nav>
+                <a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+                <a href="/security" class="active"><i class="fas fa-shield-alt"></i> Security</a>
+                <a href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </nav>
+        </header>
+
+        <div class="security-grid">
+            <!-- Security Overview -->
+            <div class="security-card">
+                <h3><i class="fas fa-chart-line"></i> Security Overview</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-number" id="total-events">-</span>
+                        <span class="stat-label">Events (24h)</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number" id="blocked-ips">-</span>
+                        <span class="stat-label">Blocked IPs</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number" id="active-alerts">-</span>
+                        <span class="stat-label">Active Alerts</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number" id="security-score">-</span>
+                        <span class="stat-label">Security Score</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security Events Chart -->
+            <div class="security-card">
+                <h3><i class="fas fa-chart-bar"></i> Security Events</h3>
+                <canvas id="securityEventsChart"></canvas>
+            </div>
+
+            <!-- Recent Security Events -->
+            <div class="security-card">
+                <h3><i class="fas fa-exclamation-triangle"></i> Recent Security Events</h3>
+                <div class="events-list" id="recent-events">
+                    <div class="loading">Loading events...</div>
+                </div>
+            </div>
+
+            <!-- Blocked IPs -->
+            <div class="security-card">
+                <h3><i class="fas fa-ban"></i> Blocked IP Addresses</h3>
+                <div class="blocked-ips-list" id="blocked-ips-list">
+                    <div class="loading">Loading blocked IPs...</div>
+                </div>
+                <button class="btn btn-secondary" onclick="refreshBlockedIPs()">
+                    <i class="fas fa-refresh"></i> Refresh
+                </button>
+            </div>
+
+            <!-- Security Permissions -->
+            <div class="security-card">
+                <h3><i class="fas fa-lock"></i> Security Permissions</h3>
+                <div class="permissions-list" id="permissions-list">
+                    <div class="loading">Loading permissions...</div>
+                </div>
+                <button class="btn btn-primary" onclick="fixPermissions()">
+                    <i class="fas fa-wrench"></i> Fix Permissions
+                </button>
+            </div>
+
+            <!-- Monitoring Alerts -->
+            <div class="security-card">
+                <h3><i class="fas fa-bell"></i> Monitoring Alerts</h3>
+                <div class="alerts-list" id="alerts-list">
+                    <div class="loading">Loading alerts...</div>
+                </div>
+                <button class="btn btn-secondary" onclick="refreshAlerts()">
+                    <i class="fas fa-refresh"></i> Refresh
+                </button>
+            </div>
+
+            <!-- Log Analysis -->
+            <div class="security-card">
+                <h3><i class="fas fa-search"></i> Log Analysis</h3>
+                <div class="log-search">
+                    <input type="text" id="log-query" placeholder="Search logs...">
+                    <select id="log-level">
+                        <option value="">All Levels</option>
+                        <option value="error">Error</option>
+                        <option value="warning">Warning</option>
+                        <option value="info">Info</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="searchLogs()">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+                <div class="log-results" id="log-results">
+                    <div class="info">Enter a search query to analyze logs</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let securityEventsChart;
+
+        // Load security data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSecurityStats();
+            loadRecentEvents();
+            loadBlockedIPs();
+            loadPermissions();
+            loadAlerts();
+            initSecurityChart();
+        });
+
+        async function loadSecurityStats() {
+            try {
+                const response = await fetch('/api/admin/security/stats');
+                const stats = await response.json();
+                
+                document.getElementById('total-events').textContent = stats.total_events_24h || 0;
+                document.getElementById('blocked-ips').textContent = stats.blocked_ips || 0;
+                
+                // Calculate security score
+                const score = calculateSecurityScore(stats);
+                document.getElementById('security-score').textContent = score + '%';
+                
+                updateSecurityChart(stats);
+            } catch (error) {
+                console.error('Error loading security stats:', error);
+            }
+        }
+
+        async function loadRecentEvents() {
+            try {
+                const response = await fetch('/api/admin/security/events?hours=24');
+                const data = await response.json();
+                
+                const eventsList = document.getElementById('recent-events');
+                eventsList.innerHTML = '';
+                
+                if (data.events && data.events.length > 0) {
+                    data.events.slice(0, 10).forEach(event => {
+                        const eventDiv = document.createElement('div');
+                        eventDiv.className = `event-item ${event.severity}`;
+                        eventDiv.innerHTML = `
+                            <div class="event-time">${new Date(event.timestamp).toLocaleString()}</div>
+                            <div class="event-message">${event.message}</div>
+                            <div class="event-source">${event.source}</div>
+                        `;
+                        eventsList.appendChild(eventDiv);
+                    });
+                } else {
+                    eventsList.innerHTML = '<div class="info">No recent security events</div>';
+                }
+            } catch (error) {
+                console.error('Error loading recent events:', error);
+            }
+        }
+
+        async function loadBlockedIPs() {
+            try {
+                const response = await fetch('/api/admin/security/blocked-ips');
+                const data = await response.json();
+                
+                const blockedList = document.getElementById('blocked-ips-list');
+                blockedList.innerHTML = '';
+                
+                if (data.blocked_ips && data.blocked_ips.length > 0) {
+                    data.blocked_ips.forEach(ip => {
+                        const ipDiv = document.createElement('div');
+                        ipDiv.className = 'blocked-ip';
+                        ipDiv.innerHTML = `
+                            <span class="ip-address">${ip}</span>
+                            <button class="btn btn-small" onclick="unblockIP('${ip}')">
+                                <i class="fas fa-unlock"></i> Unblock
+                            </button>
+                        `;
+                        blockedList.appendChild(ipDiv);
+                    });
+                } else {
+                    blockedList.innerHTML = '<div class="info">No blocked IP addresses</div>';
+                }
+            } catch (error) {
+                console.error('Error loading blocked IPs:', error);
+            }
+        }
+
+        async function loadPermissions() {
+            try {
+                const response = await fetch('/api/admin/security/permissions');
+                const data = await response.json();
+                
+                const permissionsList = document.getElementById('permissions-list');
+                permissionsList.innerHTML = '';
+                
+                if (data.permissions) {
+                    Object.entries(data.permissions).forEach(([file, info]) => {
+                        if (info.exists) {
+                            const permDiv = document.createElement('div');
+                            permDiv.className = `permission-item ${info.secure ? 'secure' : 'insecure'}`;
+                            permDiv.innerHTML = `
+                                <div class="file-path">${file}</div>
+                                <div class="permission-status">
+                                    <span class="status ${info.secure ? 'secure' : 'insecure'}">
+                                        ${info.secure ? 'Secure' : 'Insecure'}
+                                    </span>
+                                </div>
+                            `;
+                            permissionsList.appendChild(permDiv);
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading permissions:', error);
+            }
+        }
+
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/api/admin/alerts?acknowledged=false');
+                const data = await response.json();
+                
+                const alertsList = document.getElementById('alerts-list');
+                alertsList.innerHTML = '';
+                
+                if (data.alerts && data.alerts.length > 0) {
+                    data.alerts.slice(0, 5).forEach(alert => {
+                        const alertDiv = document.createElement('div');
+                        alertDiv.className = `alert-item ${alert.severity}`;
+                        alertDiv.innerHTML = `
+                            <div class="alert-time">${new Date(alert.timestamp).toLocaleString()}</div>
+                            <div class="alert-message">${alert.message}</div>
+                            <div class="alert-actions">
+                                <button class="btn btn-small" onclick="acknowledgeAlert('${alert.id}')">
+                                    <i class="fas fa-check"></i> Acknowledge
+                                </button>
+                                <button class="btn btn-small" onclick="resolveAlert('${alert.id}')">
+                                    <i class="fas fa-times"></i> Resolve
+                                </button>
+                            </div>
+                        `;
+                        alertsList.appendChild(alertDiv);
+                    });
+                } else {
+                    alertsList.innerHTML = '<div class="info">No active alerts</div>';
+                }
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+            }
+        }
+
+        function initSecurityChart() {
+            const ctx = document.getElementById('securityEventsChart').getContext('2d');
+            securityEventsChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Security Events',
+                        data: [],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateSecurityChart(stats) {
+            if (securityEventsChart && stats.severity_distribution) {
+                const labels = Object.keys(stats.severity_distribution);
+                const data = Object.values(stats.severity_distribution);
+                
+                securityEventsChart.data.labels = labels;
+                securityEventsChart.data.datasets[0].data = data;
+                securityEventsChart.update();
+            }
+        }
+
+        function calculateSecurityScore(stats) {
+            let score = 100;
+            
+            // Deduct points for security issues
+            if (stats.total_events_24h > 100) score -= 20;
+            if (stats.blocked_ips > 10) score -= 15;
+            if (stats.total_events_1h > 50) score -= 10;
+            
+            return Math.max(0, score);
+        }
+
+        async function unblockIP(ip) {
+            try {
+                const response = await fetch('/api/admin/security/unblock-ip', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ ip_address: ip })
+                });
+                
+                if (response.ok) {
+                    loadBlockedIPs();
+                    showNotification('IP unblocked successfully', 'success');
+                } else {
+                    showNotification('Failed to unblock IP', 'error');
+                }
+            } catch (error) {
+                console.error('Error unblocking IP:', error);
+                showNotification('Error unblocking IP', 'error');
+            }
+        }
+
+        async function fixPermissions() {
+            try {
+                const response = await fetch('/api/admin/security/fix-permissions', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    loadPermissions();
+                    showNotification('Permissions fixed successfully', 'success');
+                } else {
+                    showNotification('Failed to fix permissions', 'error');
+                }
+            } catch (error) {
+                console.error('Error fixing permissions:', error);
+                showNotification('Error fixing permissions', 'error');
+            }
+        }
+
+        async function acknowledgeAlert(alertId) {
+            try {
+                const response = await fetch(`/api/admin/alerts/${alertId}/acknowledge`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    loadAlerts();
+                    showNotification('Alert acknowledged', 'success');
+                } else {
+                    showNotification('Failed to acknowledge alert', 'error');
+                }
+            } catch (error) {
+                console.error('Error acknowledging alert:', error);
+                showNotification('Error acknowledging alert', 'error');
+            }
+        }
+
+        async function resolveAlert(alertId) {
+            try {
+                const response = await fetch(`/api/admin/alerts/${alertId}/resolve`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    loadAlerts();
+                    showNotification('Alert resolved', 'success');
+                } else {
+                    showNotification('Failed to resolve alert', 'error');
+                }
+            } catch (error) {
+                console.error('Error resolving alert:', error);
+                showNotification('Error resolving alert', 'error');
+            }
+        }
+
+        async function searchLogs() {
+            const query = document.getElementById('log-query').value;
+            const level = document.getElementById('log-level').value;
+            
+            if (!query) {
+                showNotification('Please enter a search query', 'warning');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/admin/logs/search?query=${encodeURIComponent(query)}&level=${level}`);
+                const data = await response.json();
+                
+                const resultsDiv = document.getElementById('log-results');
+                resultsDiv.innerHTML = '';
+                
+                if (data.results && data.results.length > 0) {
+                    data.results.slice(0, 20).forEach(log => {
+                        const logDiv = document.createElement('div');
+                        logDiv.className = `log-item ${log.level}`;
+                        logDiv.innerHTML = `
+                            <div class="log-time">${new Date(log.timestamp).toLocaleString()}</div>
+                            <div class="log-level">${log.level.toUpperCase()}</div>
+                            <div class="log-message">${log.message}</div>
+                            <div class="log-source">${log.source}</div>
+                        `;
+                        resultsDiv.appendChild(logDiv);
+                    });
+                } else {
+                    resultsDiv.innerHTML = '<div class="info">No log entries found</div>';
+                }
+            } catch (error) {
+                console.error('Error searching logs:', error);
+                showNotification('Error searching logs', 'error');
+            }
+        }
+
+        function refreshBlockedIPs() {
+            loadBlockedIPs();
+        }
+
+        function refreshAlerts() {
+            loadAlerts();
+        }
+
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            loadSecurityStats();
+            loadRecentEvents();
+        }, 30000);
+    </script>
+
+    <style>
+        .security-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .security-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .stat-number {
+            display: block;
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .events-list, .blocked-ips-list, .permissions-list, .alerts-list, .log-results {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .event-item, .alert-item, .log-item {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+
+        .event-item.high, .alert-item.critical, .log-item.error {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+        }
+
+        .event-item.medium, .alert-item.warning, .log-item.warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+        }
+
+        .event-item.low, .alert-item.info, .log-item.info {
+            background: #d1ecf1;
+            border-left-color: #17a2b8;
+        }
+
+        .blocked-ip {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .permission-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+
+        .permission-item.secure {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+        }
+
+        .permission-item.insecure {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+
+        .log-search {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .log-search input, .log-search select {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 4px;
+            color: white;
+            z-index: 1000;
+        }
+
+        .notification.success {
+            background: #28a745;
+        }
+
+        .notification.error {
+            background: #dc3545;
+        }
+
+        .notification.warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        .info {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+        }
+    </style>
+</body>
+</html> 

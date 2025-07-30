@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Form, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -12,6 +13,7 @@ import secrets
 from datetime import datetime
 import time
 import logging
+from pathlib import Path
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -59,8 +61,71 @@ from ...infrastructure.monitoring.background_monitor import background_monitor
 from ...infrastructure.traffic.bandwidth_manager import bandwidth_manager
 from ...infrastructure.protocols.openvpn_auth import openvpn_auth_manager
 from ...infrastructure.analytics.traffic_analytics import traffic_analytics, TrafficRecord
+from ...infrastructure.security.rate_limiter import rate_limiter
+from ...infrastructure.security.secret_manager import secret_manager
+from ...infrastructure.security.log_monitor import log_monitor
+from ...infrastructure.security.intrusion_detection import intrusion_detection
+from ...infrastructure.security.log_aggregator import log_aggregator
+from ...infrastructure.security.monitoring_alerts import monitoring_alerts
+from ...infrastructure.backup.backup_manager import backup_manager
 
 app = FastAPI(title="VPN Panel API", version="1.0.0")
+
+# Rate limiting middleware
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Rate limiting middleware"""
+    try:
+        # Get client identifier
+        client_id = rate_limiter._get_client_identifier(request)
+        
+        # Determine rate limit type based on path
+        path = request.url.path
+        if path.startswith("/api/auth"):
+            limit_type = "login"
+        elif path.startswith("/api/admin"):
+            limit_type = "admin_actions"
+        elif path.startswith("/api/users") and request.method == "POST":
+            limit_type = "user_creation"
+        elif path.startswith("/api/configs"):
+            limit_type = "config_download"
+        elif path.startswith("/api/upload"):
+            limit_type = "file_upload"
+        else:
+            limit_type = "api"
+        
+        # Check rate limit
+        rate_limiter.check_client_rate_limit(request, limit_type)
+        
+        # Add rate limit headers to response
+        response = await call_next(request)
+        remaining, reset_time = rate_limiter.get_remaining_requests(client_id, limit_type)
+        
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(reset_time)
+        response.headers["X-RateLimit-Type"] = limit_type
+        
+        return response
+        
+    except HTTPException as e:
+        if e.status_code == 429:
+            # Rate limit exceeded
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Rate limit exceeded",
+                    "detail": e.detail,
+                    "retry_after": e.detail.get("remaining_block_seconds", 60)
+                },
+                headers={
+                    "Retry-After": str(e.detail.get("remaining_block_seconds", 60)),
+                    "X-RateLimit-Type": limit_type
+                }
+            )
+        raise e
+    except Exception as e:
+        logger.error(f"Rate limiting error: {e}")
+        return await call_next(request)
 
 # CORS middleware
 app.add_middleware(
@@ -197,6 +262,16 @@ async def settings_page(request: Request, admin: User = Depends(require_admin)):
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request, user: User = Depends(get_current_user)):
     return templates.TemplateResponse("analytics.html", {"request": request, "user": user})
+
+@app.get("/backup", response_class=HTMLResponse)
+async def backup_page(request: Request, user: User = Depends(get_current_user)):
+    """Backup management page"""
+    return templates.TemplateResponse("backup.html", {"request": request})
+
+@app.get("/security", response_class=HTMLResponse)
+async def security_page(request: Request, user: User = Depends(get_current_user)):
+    """Security dashboard page"""
+    return templates.TemplateResponse("security.html", {"request": request})
 
 @app.post("/api/auth/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -795,6 +870,610 @@ async def export_analytics(
     except Exception as e:
         logger.error(f"Error exporting analytics: {e}")
         raise HTTPException(status_code=500, detail="Error exporting analytics")
+
+# Rate limiting management endpoints
+@app.get("/api/admin/rate-limits")
+async def get_rate_limit_stats(user: User = Depends(get_current_user)):
+    """Get rate limit statistics (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    return rate_limiter.get_all_rate_limit_stats()
+
+@app.post("/api/admin/rate-limits/reset")
+async def reset_rate_limit(
+    identifier: str,
+    limit_type: str,
+    user: User = Depends(get_current_user)
+):
+    """Reset rate limit for specific identifier (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        rate_limiter.reset_rate_limit(identifier, limit_type)
+        return {"message": f"Rate limit reset for {identifier}, type: {limit_type}"}
+    except Exception as e:
+        logger.error(f"Rate limit reset error: {e}")
+        raise HTTPException(status_code=500, detail="Reset failed")
+
+@app.put("/api/admin/rate-limits/config")
+async def update_rate_limit_config(
+    limit_type: str,
+    max_requests: int,
+    window_seconds: int,
+    block_duration: int = 0,
+    user: User = Depends(get_current_user)
+):
+    """Update rate limit configuration (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        from ...infrastructure.security.rate_limiter import RateLimitConfig
+        config = RateLimitConfig(max_requests, window_seconds, block_duration)
+        rate_limiter.update_rate_limit_config(limit_type, config)
+        return {"message": f"Rate limit config updated for {limit_type}"}
+    except Exception as e:
+        logger.error(f"Rate limit config update error: {e}")
+        raise HTTPException(status_code=500, detail="Update failed")
+
+# Secret management endpoints
+@app.get("/api/admin/secrets/summary")
+async def get_secrets_summary(user: User = Depends(get_current_user)):
+    """Get secrets summary (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    return secret_manager.get_secrets_summary()
+
+@app.post("/api/admin/secrets/rotate")
+async def rotate_secret(
+    key: str,
+    user: User = Depends(get_current_user)
+):
+    """Rotate specific secret key (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        secret_manager.rotate_secret(key)
+        return {"message": f"Secret key {key} rotated successfully"}
+    except Exception as e:
+        logger.error(f"Secret rotation error: {e}")
+        raise HTTPException(status_code=500, detail="Rotation failed")
+
+@app.post("/api/admin/secrets/rotate-all")
+async def rotate_all_secrets(user: User = Depends(get_current_user)):
+    """Rotate all secret keys (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        secret_manager.rotate_all_secrets()
+        return {"message": "All secret keys rotated successfully"}
+    except Exception as e:
+        logger.error(f"All secrets rotation error: {e}")
+        raise HTTPException(status_code=500, detail="Rotation failed")
+
+# Backup management endpoints
+@app.post("/api/admin/backups/full")
+async def create_full_backup(
+    description: str = "",
+    user: User = Depends(get_current_user)
+):
+    """Create full system backup (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        backup_info = backup_manager.create_full_backup(description)
+        return {
+            "message": "Full backup created successfully",
+            "backup_id": backup_info.backup_id,
+            "size_mb": backup_info.size_bytes / (1024 * 1024)
+        }
+    except Exception as e:
+        logger.error(f"Full backup error: {e}")
+        raise HTTPException(status_code=500, detail="Backup creation failed")
+
+@app.post("/api/admin/backups/database")
+async def create_database_backup(
+    description: str = "",
+    user: User = Depends(get_current_user)
+):
+    """Create database-only backup (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        backup_info = backup_manager.create_database_backup(description)
+        return {
+            "message": "Database backup created successfully",
+            "backup_id": backup_info.backup_id,
+            "size_mb": backup_info.size_bytes / (1024 * 1024)
+        }
+    except Exception as e:
+        logger.error(f"Database backup error: {e}")
+        raise HTTPException(status_code=500, detail="Backup creation failed")
+
+@app.post("/api/admin/backups/config")
+async def create_config_backup(
+    description: str = "",
+    user: User = Depends(get_current_user)
+):
+    """Create configuration-only backup (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        backup_info = backup_manager.create_config_backup(description)
+        return {
+            "message": "Config backup created successfully",
+            "backup_id": backup_info.backup_id,
+            "size_mb": backup_info.size_bytes / (1024 * 1024)
+        }
+    except Exception as e:
+        logger.error(f"Config backup error: {e}")
+        raise HTTPException(status_code=500, detail="Backup creation failed")
+
+@app.get("/api/admin/backups")
+async def list_backups(user: User = Depends(get_current_user)):
+    """List all backups (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        backups = backup_manager.list_backups()
+        return {
+            "backups": [
+                {
+                    "backup_id": b.backup_id,
+                    "timestamp": b.timestamp.isoformat(),
+                    "size_mb": b.size_bytes / (1024 * 1024),
+                    "type": b.type,
+                    "description": b.description,
+                    "status": b.status
+                }
+                for b in backups
+            ]
+        }
+    except Exception as e:
+        logger.error(f"List backups error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list backups")
+
+@app.get("/api/admin/backups/{backup_id}")
+async def get_backup_info(
+    backup_id: str,
+    user: User = Depends(get_current_user)
+):
+    """Get backup information (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        backup_info = backup_manager.get_backup_info(backup_id)
+        if not backup_info:
+            raise HTTPException(status_code=404, detail="Backup not found")
+        
+        return {
+            "backup_id": backup_info.backup_id,
+            "timestamp": backup_info.timestamp.isoformat(),
+            "size_mb": backup_info.size_bytes / (1024 * 1024),
+            "type": backup_info.type,
+            "description": backup_info.description,
+            "status": backup_info.status
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get backup info error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get backup info")
+
+@app.post("/api/admin/backups/{backup_id}/restore")
+async def restore_backup(
+    backup_id: str,
+    restore_type: str = "full",
+    user: User = Depends(get_current_user)
+):
+    """Restore from backup (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        success = backup_manager.restore_backup(backup_id, restore_type)
+        if success:
+            return {"message": f"Backup {backup_id} restored successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Restore failed")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    except Exception as e:
+        logger.error(f"Restore error: {e}")
+        raise HTTPException(status_code=500, detail="Restore failed")
+
+@app.delete("/api/admin/backups/{backup_id}")
+async def delete_backup(
+    backup_id: str,
+    user: User = Depends(get_current_user)
+):
+    """Delete backup (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        success = backup_manager.delete_backup(backup_id)
+        if success:
+            return {"message": f"Backup {backup_id} deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Backup not found")
+    except Exception as e:
+        logger.error(f"Delete backup error: {e}")
+        raise HTTPException(status_code=500, detail="Delete failed")
+
+@app.get("/api/admin/backups/stats")
+async def get_backup_stats(user: User = Depends(get_current_user)):
+    """Get backup statistics (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        stats = backup_manager.get_backup_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Backup stats error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get backup stats")
+
+@app.post("/api/admin/backups/cleanup")
+async def cleanup_old_backups(
+    days: int = 30,
+    user: User = Depends(get_current_user)
+):
+    """Clean up old backups (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        deleted_count = backup_manager.cleanup_old_backups(days)
+        return {"message": f"Cleaned up {deleted_count} old backups"}
+    except Exception as e:
+        logger.error(f"Cleanup error: {e}")
+        raise HTTPException(status_code=500, detail="Cleanup failed")
+
+@app.get("/api/admin/backups/{backup_id}/download")
+async def download_backup(
+    backup_id: str,
+    user: User = Depends(get_current_user)
+):
+    """Download backup file (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        backup_info = backup_manager.get_backup_info(backup_id)
+        if not backup_info:
+            raise HTTPException(status_code=404, detail="Backup not found")
+        
+        backup_path = Path(backup_info.file_path)
+        if not backup_path.exists():
+            raise HTTPException(status_code=404, detail="Backup file not found")
+        
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=backup_path,
+            filename=f"{backup_id}.zip",
+            media_type="application/zip"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download backup error: {e}")
+        raise HTTPException(status_code=500, detail="Download failed")
+
+# Security monitoring endpoints
+@app.get("/api/admin/security/stats")
+async def get_security_stats(user: User = Depends(get_current_user)):
+    """Get security statistics (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        stats = log_monitor.get_security_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Security stats error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get security stats")
+
+@app.get("/api/admin/security/events")
+async def get_security_events(
+    hours: int = 24,
+    user: User = Depends(get_current_user)
+):
+    """Get recent security events (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        events = log_monitor.get_recent_events(hours)
+        return {"events": events}
+    except Exception as e:
+        logger.error(f"Security events error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get security events")
+
+@app.get("/api/admin/security/blocked-ips")
+async def get_blocked_ips(user: User = Depends(get_current_user)):
+    """Get list of blocked IP addresses (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        blocked_ips = log_monitor.get_blocked_ips()
+        return {"blocked_ips": blocked_ips}
+    except Exception as e:
+        logger.error(f"Blocked IPs error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get blocked IPs")
+
+@app.post("/api/admin/security/unblock-ip")
+async def unblock_ip(
+    ip_address: str,
+    user: User = Depends(get_current_user)
+):
+    """Unblock IP address (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        success = log_monitor.unblock_ip(ip_address)
+        if success:
+            return {"message": f"IP {ip_address} unblocked successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="IP not found in blocked list")
+    except Exception as e:
+        logger.error(f"Unblock IP error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to unblock IP")
+
+@app.get("/api/admin/security/permissions")
+async def check_security_permissions(user: User = Depends(get_current_user)):
+    """Check security permissions (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        permissions = intrusion_detection.check_security_permissions()
+        return {"permissions": permissions}
+    except Exception as e:
+        logger.error(f"Security permissions error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check permissions")
+
+@app.post("/api/admin/security/fix-permissions")
+async def fix_security_permissions(user: User = Depends(get_current_user)):
+    """Fix security permissions (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        intrusion_detection.fix_permissions()
+        return {"message": "Security permissions fixed successfully"}
+    except Exception as e:
+        logger.error(f"Fix permissions error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fix permissions")
+
+@app.get("/api/admin/security/baseline")
+async def get_security_baseline(user: User = Depends(get_current_user)):
+    """Get security baseline (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        baseline = intrusion_detection.get_system_baseline()
+        return {"baseline": baseline}
+    except Exception as e:
+        logger.error(f"Security baseline error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get security baseline")
+
+@app.get("/api/admin/security/verify-baseline")
+async def verify_security_baseline(user: User = Depends(get_current_user)):
+    """Verify security baseline (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        verification = intrusion_detection.verify_baseline()
+        return {"verification": verification}
+    except Exception as e:
+        logger.error(f"Baseline verification error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to verify baseline")
+
+# Log aggregation endpoints
+@app.get("/api/admin/logs/collect")
+async def collect_logs(
+    hours: int = 24,
+    user: User = Depends(get_current_user)
+):
+    """Collect logs from all sources (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        result = log_aggregator.collect_logs(hours)
+        return result
+    except Exception as e:
+        logger.error(f"Log collection error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to collect logs")
+
+@app.get("/api/admin/logs/search")
+async def search_logs(
+    query: str,
+    hours: int = 24,
+    level: str = None,
+    user: User = Depends(get_current_user)
+):
+    """Search logs (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        results = log_aggregator.search_logs(query, hours, level)
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Log search error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to search logs")
+
+@app.get("/api/admin/logs/stats")
+async def get_log_statistics(
+    hours: int = 24,
+    user: User = Depends(get_current_user)
+):
+    """Get log statistics (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        stats = log_aggregator.get_log_statistics(hours)
+        return stats
+    except Exception as e:
+        logger.error(f"Log statistics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get log statistics")
+
+@app.get("/api/admin/logs/export")
+async def export_logs(
+    format: str = "json",
+    hours: int = 24,
+    user: User = Depends(get_current_user)
+):
+    """Export logs (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        file_path = log_aggregator.export_logs(format, hours)
+        if file_path:
+            return FileResponse(file_path, filename=f"logs_export.{format}")
+        else:
+            raise HTTPException(status_code=500, detail="Failed to export logs")
+    except Exception as e:
+        logger.error(f"Log export error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to export logs")
+
+# Monitoring alerts endpoints
+@app.get("/api/admin/alerts")
+async def get_alerts(
+    severity: str = None,
+    acknowledged: bool = None,
+    hours: int = 24,
+    user: User = Depends(get_current_user)
+):
+    """Get monitoring alerts (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        alerts = monitoring_alerts.get_alerts(severity, acknowledged, hours)
+        return {"alerts": alerts}
+    except Exception as e:
+        logger.error(f"Get alerts error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get alerts")
+
+@app.post("/api/admin/alerts/{alert_id}/acknowledge")
+async def acknowledge_alert(
+    alert_id: str,
+    user: User = Depends(get_current_user)
+):
+    """Acknowledge an alert (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        success = monitoring_alerts.acknowledge_alert(alert_id)
+        if success:
+            return {"message": "Alert acknowledged successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Alert not found")
+    except Exception as e:
+        logger.error(f"Acknowledge alert error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to acknowledge alert")
+
+@app.post("/api/admin/alerts/{alert_id}/resolve")
+async def resolve_alert(
+    alert_id: str,
+    user: User = Depends(get_current_user)
+):
+    """Resolve an alert (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        success = monitoring_alerts.resolve_alert(alert_id)
+        if success:
+            return {"message": "Alert resolved successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Alert not found")
+    except Exception as e:
+        logger.error(f"Resolve alert error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to resolve alert")
+
+@app.get("/api/admin/alerts/stats")
+async def get_alert_statistics(user: User = Depends(get_current_user)):
+    """Get alert statistics (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        stats = monitoring_alerts.get_alert_statistics()
+        return stats
+    except Exception as e:
+        logger.error(f"Alert statistics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get alert statistics")
+
+@app.post("/api/admin/alerts/rules/{rule_name}/enable")
+async def enable_alert_rule(
+    rule_name: str,
+    user: User = Depends(get_current_user)
+):
+    """Enable alert rule (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        monitoring_alerts.enable_alert_rule(rule_name)
+        return {"message": f"Alert rule {rule_name} enabled successfully"}
+    except Exception as e:
+        logger.error(f"Enable alert rule error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to enable alert rule")
+
+@app.post("/api/admin/alerts/rules/{rule_name}/disable")
+async def disable_alert_rule(
+    rule_name: str,
+    user: User = Depends(get_current_user)
+):
+    """Disable alert rule (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        monitoring_alerts.disable_alert_rule(rule_name)
+        return {"message": f"Alert rule {rule_name} disabled successfully"}
+    except Exception as e:
+        logger.error(f"Disable alert rule error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disable alert rule")
+
+@app.get("/api/admin/alerts/rules")
+async def get_alert_rules(user: User = Depends(get_current_user)):
+    """Get alert rules (admin only)"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        rules = monitoring_alerts.get_alert_rules()
+        return {"alert_rules": rules}
+    except Exception as e:
+        logger.error(f"Get alert rules error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get alert rules")
+
+# Start background monitoring
+@app.on_event("startup")
+async def start_background_monitor():
+    await background_monitor.start_monitoring()
 
 if __name__ == "__main__":
     import uvicorn
