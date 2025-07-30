@@ -51,7 +51,19 @@ vpn-panel/
 
 ## 📦 Installation
 
-### Quick Install
+### Quick Install (One-Line)
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/smaghili/vpn-panel/main/install.sh)
+```
+
+**نکات مهم:**
+- اسکریپت به صورت خودکار تمام وابستگی‌ها را نصب می‌کند
+- از شما پورت، نام کاربری، رمز عبور و ایمیل ادمین را می‌پرسد
+- WireGuard و OpenVPN را به صورت خودکار پیکربندی می‌کند
+- Firewall را برای امنیت تنظیم می‌کند
+- سرویس systemd ایجاد می‌کند
+
+### Manual Install
 ```bash
 # Clone the repository
 git clone https://github.com/smaghili/vpn-panel.git
@@ -159,6 +171,9 @@ user_data = {
 - **Rate Limiting**: DDoS protection
 - **Input Sanitization**: XSS prevention
 - **Audit Logging**: Comprehensive activity tracking
+- **Firewall Configuration**: Automatic iptables setup
+- **SSH Security**: SSH port disabled by default for security
+- **VPN Isolation**: Separate network namespaces for VPN protocols
 
 ## 🚀 Performance Features
 
@@ -222,6 +237,31 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Documentation**: [Wiki](https://github.com/smaghili/vpn-panel/wiki)
 - **Issues**: [GitHub Issues](https://github.com/smaghili/vpn-panel/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/smaghili/vpn-panel/discussions)
+
+## 🔧 Troubleshooting
+
+
+### Service Issues
+```bash
+# بررسی وضعیت سرویس
+sudo systemctl status vpn-panel
+
+# مشاهده لاگ‌ها
+sudo journalctl -u vpn-panel -f
+
+# راه‌اندازی مجدد
+sudo systemctl restart vpn-panel
+```
+
+### Firewall Issues
+```bash
+# بررسی قوانین iptables
+sudo iptables -L -n -v
+
+# بازنشانی firewall
+sudo iptables -F
+sudo iptables -X
+```
 
 ## 🗺️ Roadmap
 
