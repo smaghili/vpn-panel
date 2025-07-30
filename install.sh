@@ -81,12 +81,44 @@ get_user_input() {
         fi
     done
     
-
+    # Get OpenVPN port
+    while true; do
+        read -p "Enter OpenVPN port (default: 1194): " OPENVPN_PORT
+        OPENVPN_PORT=${OPENVPN_PORT:-1194}
+        if [[ $OPENVPN_PORT =~ ^[0-9]+$ ]] && [ $OPENVPN_PORT -ge 1 ] && [ $OPENVPN_PORT -le 65535 ]; then
+            break
+        else
+            print_error "Port must be a number between 1 and 65535"
+        fi
+    done
+    
+    # Get OpenVPN protocol
+    while true; do
+        echo "Select OpenVPN protocol:"
+        echo "  1) UDP (faster, recommended)"
+        echo "  2) TCP (more reliable)"
+        read -p "Protocol choice [1-2]: " PROTOCOL_CHOICE
+        case $PROTOCOL_CHOICE in
+            1)
+                OPENVPN_PROTOCOL="udp"
+                break
+                ;;
+            2)
+                OPENVPN_PROTOCOL="tcp"
+                break
+                ;;
+            *)
+                print_error "Please select 1 or 2"
+                ;;
+        esac
+    done
     
     echo ""
     print_status "Installation will proceed with:"
-    echo "  Port: $PORT"
+    echo "  Panel Port: $PORT"
     echo "  Admin Username: $ADMIN_USERNAME"
+    echo "  OpenVPN Port: $OPENVPN_PORT"
+    echo "  OpenVPN Protocol: $OPENVPN_PROTOCOL"
     echo ""
     
     read -p "Continue with installation? (y/N): " CONFIRM
@@ -222,59 +254,81 @@ EOF
 
 # Function to setup OpenVPN
 setup_openvpn() {
-    print_status "Setting up OpenVPN..."
+    print_status "Setting up OpenVPN with modern encryption..."
     
     # Setup Easy-RSA
     cd /etc/openvpn
     make-cadir easy-rsa
     cd easy-rsa
     
+    # Configure Easy-RSA for ECDSA certificates
+    echo "set_var EASYRSA_ALGO ec" > vars
+    echo "set_var EASYRSA_CURVE prime256v1" >> vars
+    
     # Initialize PKI
     ./easyrsa init-pki
     ./easyrsa build-ca nopass
     
-    # Generate server certificate
+    # Generate server certificate (ECDSA)
     ./easyrsa build-server-full server nopass
     
-    # Generate Diffie-Hellman parameters
-    ./easyrsa gen-dh
+    # Generate tls-crypt key (modern alternative to tls-auth)
+    openvpn --genkey secret tls-crypt.key
     
-    # Generate TLS auth key
-    openvpn --genkey secret ta.key
-    
-    # Create server config
+    # Create modern server config
     cat > /etc/openvpn/server.conf << EOF
-port 1194
-proto udp
+port $OPENVPN_PORT
+proto $OPENVPN_PROTOCOL
 dev tun
-ca ca.crt
-cert server.crt
-key server.key
-dh dh.pem
-auth SHA256
-server 10.8.0.0 255.255.255.0
-ifconfig-pool-persist ipp.txt
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 8.8.8.8"
-push "dhcp-option DNS 8.8.4.4"
-keepalive 10 120
-tls-auth ta.key 0
-cipher AES-256-CBC
-auth SHA256
 user nobody
 group nogroup
 persist-key
 persist-tun
-status openvpn-status.log
+keepalive 10 120
+topology subnet
+server 10.8.0.0 255.255.255.0
+ifconfig-pool-persist ipp.txt
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS 1.0.0.1"
+dh none
+ecdh-curve prime256v1
+tls-crypt tls-crypt.key
+crl-verify crl.pem
+ca ca.crt
+cert server.crt
+key server.key
+auth SHA256
+cipher AES-128-GCM
+ncp-ciphers AES-128-GCM
+tls-server
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
+client-config-dir /etc/openvpn/ccd
+status /var/log/openvpn/status.log
 verb 3
 explicit-exit-notify 1
 EOF
+    
+    # Create client-config-dir
+    mkdir -p /etc/openvpn/ccd
+    
+    # Create log directory
+    mkdir -p /var/log/openvpn
+    
+    # Copy certificates to OpenVPN directory
+    cp pki/ca.crt pki/private/ca.key "pki/issued/server.crt" "pki/private/server.key" pki/crl.pem /etc/openvpn/
+    cp tls-crypt.key /etc/openvpn/
+    
+    # Set proper permissions
+    chmod 644 /etc/openvpn/crl.pem
+    chmod 600 /etc/openvpn/tls-crypt.key
     
     # Enable and start OpenVPN
     systemctl enable openvpn@server
     systemctl start openvpn@server
     
-    print_success "OpenVPN setup completed"
+    print_success "OpenVPN setup completed with modern encryption (AES-128-GCM + ECDSA)"
 }
 
 # Function to setup security
