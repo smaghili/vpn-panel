@@ -258,6 +258,13 @@ setup_openvpn() {
     
     # Setup Easy-RSA
     cd /etc/openvpn
+    
+    # Remove existing easy-rsa if it exists
+    if [ -d "easy-rsa" ]; then
+        print_status "Removing existing easy-rsa directory..."
+        rm -rf easy-rsa
+    fi
+    
     make-cadir easy-rsa
     cd easy-rsa
     
