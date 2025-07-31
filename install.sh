@@ -37,6 +37,32 @@ check_root() {
     fi
 }
 
+# ===== UTILITY FUNCTIONS =====
+# Generate secure random password
+generate_random_password() {
+    local length=${1:-12}
+    # Use multiple sources for better randomness
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -base64 $((length * 3/4 + 1)) | tr -d "=+/" | cut -c1-$length
+    elif [ -f /dev/urandom ]; then
+        tr -dc 'A-Za-z0-9!@#$%^&*' < /dev/urandom | head -c $length
+    else
+        # Fallback method
+        date +%s | sha256sum | base64 | head -c $length
+    fi
+}
+
+# Validate password strength
+validate_password() {
+    local password="$1"
+    local min_length=8
+    
+    if [ ${#password} -lt $min_length ]; then
+        return 1
+    fi
+    return 0
+}
+
 # Function to get user input
 get_user_input() {
     echo -e "${BLUE}=== VPN Panel Installation ===${NC}"
@@ -64,22 +90,29 @@ get_user_input() {
         fi
     done
     
-    # Get admin password
-    while true; do
-        read -s -p "Enter admin password (min 8 characters): " ADMIN_PASSWORD
-        echo ""
-        if [ ${#ADMIN_PASSWORD} -ge 8 ]; then
-            read -s -p "Confirm admin password: " ADMIN_PASSWORD_CONFIRM
-            echo ""
-            if [ "$ADMIN_PASSWORD" = "$ADMIN_PASSWORD_CONFIRM" ]; then
-                break
-            else
-                print_error "Passwords do not match"
-            fi
-        else
+    # ===== ADMIN PASSWORD INPUT =====
+    # Get admin password with enhanced UX
+    echo ""
+    echo "Enter admin password (leave empty for auto-generation):"
+    echo "  • Minimum 8 characters required"
+    echo "  • Press ENTER without typing for random password"
+    echo ""
+    read -p "Admin password: " ADMIN_PASSWORD
+    
+    # Generate random password if empty
+    if [ -z "$ADMIN_PASSWORD" ]; then
+        ADMIN_PASSWORD=$(generate_random_password 12)
+        ADMIN_PASSWORD_GENERATED=true
+        print_status "Random password generated successfully"
+    else
+        # Validate manual password
+        if [ ${#ADMIN_PASSWORD} -lt 8 ]; then
             print_error "Password must be at least 8 characters"
+            exit 1
         fi
-    done
+        ADMIN_PASSWORD_GENERATED=false
+        print_status "Manual password accepted"
+    fi
     
     # Get OpenVPN port
     while true; do
@@ -128,42 +161,48 @@ get_user_input() {
     fi
 }
 
-# Function to update system
+# ===== SILENT SYSTEM UPDATE =====
 update_system() {
     print_status "Updating system packages..."
-    apt-get update
-    apt-get upgrade -y
+    apt-get update >/dev/null 2>&1
+    apt-get upgrade -y >/dev/null 2>&1
     print_success "System updated successfully"
 }
 
-# Function to install system dependencies
+# ===== SILENT PACKAGE INSTALLATION =====
 install_system_deps() {
     print_status "Installing system dependencies..."
     
+    # Silent installation function
+    silent_install() {
+        local packages=("$@")
+        for package in "${packages[@]}"; do
+            if ! dpkg -l | grep -q "^ii.*$package "; then
+                apt-get install -y "$package" >/dev/null 2>&1
+            fi
+        done
+    }
+    
     # Essential packages
-    apt-get install -y curl wget git unzip software-properties-common apt-transport-https ca-certificates gnupg lsb-release
+    silent_install curl wget git unzip software-properties-common apt-transport-https ca-certificates gnupg lsb-release
     
     # Python and development tools
-    apt-get install -y python3 python3-pip python3-venv python3-dev build-essential
+    silent_install python3 python3-pip python3-venv python3-dev build-essential
     
     # VPN protocols
-    apt-get install -y wireguard wireguard-tools openvpn easy-rsa
+    silent_install wireguard wireguard-tools openvpn easy-rsa
     
     # Database and caching
-    apt-get install -y sqlite3 redis-server
+    silent_install sqlite3 redis-server
     
     # System monitoring
-    apt-get install -y htop iotop nethogs iftop
+    silent_install htop iotop nethogs iftop
     
     # Network tools
-    apt-get install -y net-tools iproute2
-    
-
-    
-
+    silent_install net-tools iproute2
     
     # Additional Python packages
-    apt-get install -y python3-psutil python3-redis python3-websockets python3-cryptography
+    silent_install python3-psutil python3-redis python3-websockets python3-cryptography
     
     print_success "System dependencies installed successfully"
 }
@@ -190,27 +229,36 @@ create_directories() {
     print_success "Directories created successfully"
 }
 
-# Function to setup Python environment
+# ===== SILENT PYTHON ENVIRONMENT =====
 setup_python_env() {
     print_status "Setting up Python virtual environment..."
     
     cd /var/lib/vpn-panel
     
-    # Create virtual environment
-    python3 -m venv venv
+    # Create virtual environment silently
+    python3 -m venv venv >/dev/null 2>&1
     source venv/bin/activate
     
-    # Upgrade pip
-    pip install --upgrade pip setuptools wheel
+    # Silent pip installation function
+    silent_pip_install() {
+        local packages=("$@")
+        for package in "${packages[@]}"; do
+            if ! pip show "${package%\[*\]}" >/dev/null 2>&1; then
+                pip install --quiet --disable-pip-version-check "$package" >/dev/null 2>&1
+            fi
+        done
+    }
     
-    # Install Python dependencies
-    print_status "Installing Python dependencies..."
-    pip install fastapi uvicorn jinja2 python-multipart
-    pip install bcrypt pydantic python-jose[cryptography]
-    pip install redis psutil websockets
-    pip install cryptography pycryptodome
-    pip install pytest pytest-asyncio httpx
-    pip install structlog python-json-logger
+    # Upgrade pip silently
+    pip install --quiet --disable-pip-version-check --upgrade pip setuptools wheel >/dev/null 2>&1
+    
+    # Install Python dependencies silently
+    silent_pip_install fastapi uvicorn jinja2 python-multipart
+    silent_pip_install bcrypt pydantic "python-jose[cryptography]"
+    silent_pip_install redis psutil websockets
+    silent_pip_install cryptography pycryptodome
+    silent_pip_install pytest pytest-asyncio httpx
+    silent_pip_install structlog python-json-logger
     
     print_success "Python environment setup completed"
 }
@@ -252,90 +300,268 @@ EOF
     print_success "WireGuard setup completed"
 }
 
-# Function to setup OpenVPN
+# ===== OPENVPN SETUP FUNCTION =====
+# Complete OpenVPN installation based on angristan/openvpn-install
 setup_openvpn() {
-    print_status "Setting up OpenVPN with modern encryption..."
+    print_status "Setting up OpenVPN with professional configuration..."
     
-    # Setup Easy-RSA
-    cd /etc/openvpn
+    # ===== CLEANUP EXISTING INSTALLATION =====
+    print_status "Cleaning up any existing OpenVPN installation..."
     
-    # Remove existing easy-rsa if it exists
-    if [ -d "easy-rsa" ]; then
-        print_status "Removing existing easy-rsa directory..."
-        rm -rf easy-rsa
+    # Stop existing OpenVPN services
+    systemctl stop openvpn@server 2>/dev/null || true
+    systemctl stop openvpn-server@server 2>/dev/null || true
+    systemctl disable openvpn@server 2>/dev/null || true
+    systemctl disable openvpn-server@server 2>/dev/null || true
+    
+    # Remove existing OpenVPN configuration and files
+    rm -rf /etc/openvpn/*
+    rm -rf /var/log/openvpn
+    rm -f /etc/systemd/system/openvpn@.service
+    rm -f /etc/systemd/system/openvpn-server@.service
+    
+    # ===== DETECT SYSTEM CONFIGURATION =====
+    # Find out if the machine uses nogroup or nobody for the permissionless group
+    if grep -qs "^nogroup:" /etc/group; then
+        NOGROUP=nogroup
+    else
+        NOGROUP=nobody
     fi
     
-    make-cadir easy-rsa
-    cd easy-rsa
+    # Get the "public" interface from the default route
+    NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
+    if [[ -z $NIC ]]; then
+        NIC=$(ip -6 route show default | sed -ne 's/^default .* dev \([^ ]*\) .*$/\1/p')
+    fi
     
-    # Configure Easy-RSA for ECDSA certificates
-    echo "set_var EASYRSA_ALGO ec" > vars
-    echo "set_var EASYRSA_CURVE prime256v1" >> vars
+    # Detect public IP
+    PUBLIC_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s api.ipify.org 2>/dev/null || echo "")
     
-    # Initialize PKI
+    # ===== INSTALL EASY-RSA FROM SOURCE =====
+    print_status "Installing Easy-RSA from source..."
+    
+    # Download and install Easy-RSA
+    local version="3.1.2"
+    wget -O /tmp/easy-rsa.tgz "https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz"
+    mkdir -p /etc/openvpn/easy-rsa
+    tar xzf /tmp/easy-rsa.tgz --strip-components=1 --no-same-owner --directory /etc/openvpn/easy-rsa
+    rm -f /tmp/easy-rsa.tgz
+    
+    # ===== CONFIGURE EASY-RSA =====
+    cd /etc/openvpn/easy-rsa/
+    
+    # Configure for ECDSA certificates (modern and fast)
+    cat > vars << EOF
+set_var EASYRSA_ALGO ec
+set_var EASYRSA_CURVE prime256v1
+set_var EASYRSA_CA_EXPIRE 3650
+set_var EASYRSA_CERT_EXPIRE 3650
+set_var EASYRSA_CRL_DAYS 3650
+EOF
+    
+    # ===== GENERATE CERTIFICATES =====
+    print_status "Generating certificates and keys..."
+    
+    # Generate random server name
+    SERVER_CN="cn_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
+    SERVER_NAME="server_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
+    
+    # Save server name for client generation
+    echo "$SERVER_CN" > SERVER_CN_GENERATED
+    echo "$SERVER_NAME" > SERVER_NAME_GENERATED
+    
+    # Initialize PKI and create CA
     ./easyrsa init-pki
-    ./easyrsa build-ca nopass
+    EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
     
-    # Generate server certificate (ECDSA)
-    ./easyrsa build-server-full server nopass
+    # Generate server certificate
+    EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-server-full "$SERVER_NAME" nopass
     
-    # Generate tls-crypt key (modern alternative to tls-auth)
-    openvpn --genkey secret tls-crypt.key
+    # Generate CRL (Certificate Revocation List)
+    EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
     
-    # Create modern server config
+    # Generate tls-crypt key
+    openvpn --genkey secret /etc/openvpn/tls-crypt.key
+    
+    # ===== COPY CERTIFICATES =====
+    print_status "Installing certificates..."
+    
+    # Copy certificates to OpenVPN directory
+    cp pki/ca.crt pki/private/ca.key "pki/issued/$SERVER_NAME.crt" "pki/private/$SERVER_NAME.key" pki/crl.pem /etc/openvpn/
+    cp /etc/openvpn/tls-crypt.key /etc/openvpn/
+    
+    # Set proper permissions
+    chmod 644 /etc/openvpn/crl.pem
+    chmod 600 /etc/openvpn/tls-crypt.key
+    chmod 600 /etc/openvpn/pki/private/* 2>/dev/null || true
+    
+    # ===== CREATE SERVER CONFIGURATION =====
+    print_status "Creating server configuration..."
+    
     cat > /etc/openvpn/server.conf << EOF
+# OpenVPN Server Configuration
+# Generated by VPN Panel Installer
+
+# Network settings
 port $OPENVPN_PORT
 proto $OPENVPN_PROTOCOL
 dev tun
+
+# Security settings
 user nobody
-group nogroup
+group $NOGROUP
 persist-key
 persist-tun
+
+# Connection settings
 keepalive 10 120
 topology subnet
 server 10.8.0.0 255.255.255.0
 ifconfig-pool-persist ipp.txt
+
+# DNS and routing
 push "redirect-gateway def1 bypass-dhcp"
 push "dhcp-option DNS 1.1.1.1"
 push "dhcp-option DNS 1.0.0.1"
+
+# Modern encryption (ECDSA + AES-128-GCM)
 dh none
 ecdh-curve prime256v1
 tls-crypt tls-crypt.key
 crl-verify crl.pem
+
+# Certificates
 ca ca.crt
-cert server.crt
-key server.key
+cert $SERVER_NAME.crt
+key $SERVER_NAME.key
+
+# Cipher settings
 auth SHA256
 cipher AES-128-GCM
 ncp-ciphers AES-128-GCM
 tls-server
 tls-version-min 1.2
 tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
+
+# Management
 client-config-dir /etc/openvpn/ccd
 status /var/log/openvpn/status.log
 verb 3
 explicit-exit-notify 1
 EOF
     
-    # Create client-config-dir
+    # ===== CREATE DIRECTORIES =====
     mkdir -p /etc/openvpn/ccd
-    
-    # Create log directory
     mkdir -p /var/log/openvpn
     
-    # Copy certificates to OpenVPN directory
-    cp pki/ca.crt pki/private/ca.key "pki/issued/server.crt" "pki/private/server.key" pki/crl.pem /etc/openvpn/
-    cp tls-crypt.key /etc/openvpn/
+    # ===== CREATE CLIENT TEMPLATE =====
+    print_status "Creating client template..."
     
-    # Set proper permissions
-    chmod 644 /etc/openvpn/crl.pem
-    chmod 600 /etc/openvpn/tls-crypt.key
+    cat > /etc/openvpn/client-template.txt << EOF
+client
+remote ${PUBLIC_IP:-localhost} $OPENVPN_PORT
+proto $OPENVPN_PROTOCOL
+dev tun
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+verify-x509-name $SERVER_NAME name
+auth SHA256
+auth-nocache
+cipher AES-128-GCM
+tls-client
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
+ignore-unknown-option block-outside-dns
+setenv opt block-outside-dns
+verb 3
+explicit-exit-notify
+EOF
     
-    # Enable and start OpenVPN
-    systemctl enable openvpn@server
-    systemctl start openvpn@server
+    # ===== SETUP IPTABLES RULES =====
+    print_status "Configuring firewall rules..."
     
-    print_success "OpenVPN setup completed with modern encryption (AES-128-GCM + ECDSA)"
+    # Create iptables rules directory
+    mkdir -p /etc/iptables
+    
+    # Script to add OpenVPN rules
+    cat > /etc/iptables/add-openvpn-rules.sh << EOF
+#!/bin/bash
+# Add OpenVPN iptables rules
+iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+iptables -I INPUT 1 -i tun0 -j ACCEPT
+iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
+iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
+iptables -I INPUT 1 -i $NIC -p $OPENVPN_PROTOCOL --dport $OPENVPN_PORT -j ACCEPT
+EOF
+    
+    # Script to remove OpenVPN rules
+    cat > /etc/iptables/rm-openvpn-rules.sh << EOF
+#!/bin/bash
+# Remove OpenVPN iptables rules
+iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE 2>/dev/null || true
+iptables -D INPUT -i tun0 -j ACCEPT 2>/dev/null || true
+iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT 2>/dev/null || true
+iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT 2>/dev/null || true
+iptables -D INPUT -i $NIC -p $OPENVPN_PROTOCOL --dport $OPENVPN_PORT -j ACCEPT 2>/dev/null || true
+EOF
+    
+    chmod +x /etc/iptables/add-openvpn-rules.sh
+    chmod +x /etc/iptables/rm-openvpn-rules.sh
+    
+    # ===== CREATE SYSTEMD SERVICE FOR IPTABLES =====
+    cat > /etc/systemd/system/iptables-openvpn.service << EOF
+[Unit]
+Description=iptables rules for OpenVPN
+Before=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/iptables/add-openvpn-rules.sh
+ExecStop=/etc/iptables/rm-openvpn-rules.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # ===== ENABLE IP FORWARDING =====
+    print_status "Enabling IP forwarding..."
+    
+    echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
+    sysctl --system
+    
+    # ===== START SERVICES =====
+    print_status "Starting OpenVPN services..."
+    
+    # Reload systemd and start services silently
+    systemctl daemon-reload >/dev/null 2>&1
+    
+    # Enable and start iptables rules silently
+    systemctl enable iptables-openvpn >/dev/null 2>&1
+    systemctl start iptables-openvpn >/dev/null 2>&1
+    
+    # Enable and start OpenVPN silently
+    systemctl enable openvpn@server >/dev/null 2>&1
+    systemctl start openvpn@server >/dev/null 2>&1
+    
+    # Wait a moment for service to start
+    sleep 3
+    
+    # Check if OpenVPN started successfully
+    if systemctl is-active --quiet openvpn@server; then
+        print_success "OpenVPN setup completed successfully!"
+        print_status "OpenVPN is running on port $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
+        print_status "Server certificate: $SERVER_NAME"
+        print_status "Encryption: AES-128-GCM with ECDSA certificates"
+    else
+        print_error "OpenVPN failed to start. Checking logs..."
+        journalctl -u openvpn@server --no-pager -l
+        exit 1
+    fi
 }
 
 # Function to setup security
@@ -533,34 +759,77 @@ create_admin_user() {
     print_success "Admin user created successfully"
 }
 
-# Function to display final information
+# ===== INSTALLATION COMPLETION & SUMMARY =====
+# Display final installation summary with credentials
 display_final_info() {
+    print_success "VPN Panel installation completed successfully!"
+    
     echo ""
-    echo -e "${GREEN}=== VPN Panel Installation Completed! ===${NC}"
+    echo "=================================================================="
+    echo "🎉            VPN PANEL - INSTALLATION COMPLETE            🎉"
+    echo "=================================================================="
     echo ""
-    echo -e "${BLUE}Access Information:${NC}"
-    echo "  URL: http://$(curl -s ifconfig.me):$PORT"
-    echo "  Username: $ADMIN_USERNAME"
-    echo "  Password: $ADMIN_PASSWORD"
+    echo "📋 SYSTEM INFORMATION:"
+    echo "   • Panel URL: http://$(curl -s ifconfig.me):$PORT"
+    echo "   • Panel Port: $PORT"
+    echo "   • WireGuard Port: 51820"
+    echo "   • OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
     echo ""
-    echo -e "${BLUE}Service Management:${NC}"
-    echo "  Start: sudo systemctl start vpn-panel"
-    echo "  Stop: sudo systemctl stop vpn-panel"
-    echo "  Status: sudo systemctl status vpn-panel"
-    echo "  Logs: sudo journalctl -u vpn-panel -f"
+    echo "🔐 ADMIN CREDENTIALS:"
+    echo "   • Username: $ADMIN_USERNAME"
+    if [ "$ADMIN_PASSWORD_GENERATED" = true ]; then
+        echo "   • Password: $ADMIN_PASSWORD (AUTO-GENERATED)"
+        echo ""
+        echo "⚠️  IMPORTANT: Save these credentials securely!"
+        echo "   The auto-generated password will not be shown again."
+    else
+        echo "   • Password: [Your manual password]"
+    fi
     echo ""
-    echo -e "${BLUE}Files Location:${NC}"
-    echo "  Application: /var/lib/vpn-panel"
-    echo "  Logs: /var/log/vpn-panel"
-    echo "  Config: /etc/vpn-panel"
+    echo "🚀 NEXT STEPS:"
+    echo "   1. Open browser and go to: http://$(curl -s ifconfig.me):$PORT"
+    echo "   2. Login with the credentials above"
+    echo "   3. Start creating VPN users and servers"
     echo ""
-    echo -e "${YELLOW}Security Notes:${NC}"
-    echo "  - Change default admin password"
-    echo "  - Configure firewall rules"
-    echo "  - Set up SSL certificate"
-    echo "  - Regular system updates"
+    echo "🔧 SERVICE MANAGEMENT:"
+    echo "   • Start: sudo systemctl start vpn-panel"
+    echo "   • Stop: sudo systemctl stop vpn-panel"
+    echo "   • Status: sudo systemctl status vpn-panel"
+    echo "   • Logs: sudo journalctl -u vpn-panel -f"
     echo ""
-    echo -e "${GREEN}Installation completed successfully!${NC}"
+    echo "📁 FILES LOCATION:"
+    echo "   • Application: /var/lib/vpn-panel"
+    echo "   • Logs: /var/log/vpn-panel"
+    echo "   • Config: /etc/vpn-panel"
+    echo "   • Credentials: /root/vpn-panel-credentials.txt"
+    echo ""
+    echo "📚 DOCUMENTATION:"
+    echo "   • GitHub: https://github.com/smaghili/vpn-panel"
+    echo "   • Support: Create an issue on GitHub"
+    echo ""
+    echo "=================================================================="
+    
+    # Save credentials to file for reference
+    cat > /root/vpn-panel-credentials.txt << EOF
+VPN Panel Installation - $(date)
+================================
+
+Panel URL: http://$(curl -s ifconfig.me):$PORT
+Admin Username: $ADMIN_USERNAME
+Admin Password: $ADMIN_PASSWORD
+Panel Port: $PORT
+WireGuard Port: 51820
+OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)
+
+Installation Date: $(date)
+Server IP: $(curl -s ifconfig.me)
+EOF
+    
+    chmod 600 /root/vpn-panel-credentials.txt
+    echo "💾 Credentials saved to: /root/vpn-panel-credentials.txt"
+    echo ""
+    
+    print_success "Installation completed! Panel is ready to use."
 }
 
 # Main installation function
