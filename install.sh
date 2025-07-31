@@ -66,16 +66,8 @@ validate_password() {
 # Function to check existing installation
 check_existing_installation() {
     if [ -d "/var/lib/vpn-panel" ] || [ -f "/etc/systemd/system/vpn-panel.service" ] || systemctl is-active --quiet redis-server 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  VPN Panel is already installed!${NC}"
-        echo ""
-        echo "Would you like to completely remove all settings and reinstall?"
-        echo "This will delete:"
-        echo "  • All VPN users and configurations"
-        echo "  • Database and settings"  
-        echo "  • Redis cache"
-        echo "  • All certificates and keys"
-        echo ""
-        read -p "Remove everything and reinstall? [Y/n]: " REINSTALL
+        echo -n -e "${YELLOW}⚠️  VPN Panel is already installed! Would you like to completely remove all settings and reinstall? [Y/n]: ${NC}"
+        read REINSTALL
         REINSTALL=${REINSTALL:-Y}
         
         if [[ $REINSTALL =~ ^[Yy]$ ]]; then
@@ -112,15 +104,8 @@ check_existing_installation() {
 
 # Function to get user input with auto mode
 get_user_input() {
-    echo -e "${BLUE}=== VPN Panel Installation ===${NC}"
-    echo ""
-    echo "🚀 Quick Setup Available!"
-    echo ""
-    echo "Choose installation mode:"
-    echo "  Y - Auto mode (recommended): Use secure defaults"
-    echo "  N - Manual mode: Configure everything yourself"
-    echo ""
-    read -p "Use auto mode? [Y/n]: " AUTO_MODE
+    echo -n -e "${BLUE}🚀 Do you want to install with auto mode? [Y/n]: ${NC}"
+    read AUTO_MODE
     AUTO_MODE=${AUTO_MODE:-Y}
     
     if [[ $AUTO_MODE =~ ^[Yy]$ ]]; then
@@ -135,16 +120,9 @@ get_user_input() {
         WIREGUARD_PORT="51820"
         
         echo ""
-        print_success "Auto-generated configuration:"
-        echo "  👤 Admin Username: $ADMIN_USERNAME"
-        echo "  🔑 Admin Password: $ADMIN_PASSWORD"
-        echo "  🌐 Panel Port: $PORT"
-        echo "  🔒 OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
-        echo "  🔒 WireGuard Port: $WIREGUARD_PORT (udp)"
+        print_success "Auto-generated configuration created"
         echo ""
-        echo "⚠️  IMPORTANT: Save these credentials!"
-        echo ""
-        read -p "Press ENTER to continue with these settings..."
+        read -p "Press ENTER to continue with installation..."
         
     else
         # MANUAL MODE - Ask user for everything
@@ -817,6 +795,13 @@ EOF
     chmod +x main.py
     chmod +x create_admin.py
     
+    # Install owpanel management tool
+    if [ -f "scripts/owpanel.py" ]; then
+        chmod +x scripts/owpanel.py
+        ln -sf /var/lib/vpn-panel/scripts/owpanel.py /usr/local/bin/owpanel
+        print_success "OWPanel management tool installed"
+    fi
+    
     print_success "VPN Panel application created successfully"
 }
 
@@ -974,11 +959,12 @@ display_final_info() {
     echo "   2. Login with the credentials above"
     echo "   3. Start creating VPN users and servers"
     echo ""
-    echo "🔧 SERVICE MANAGEMENT:"
-    echo "   • Start: sudo systemctl start vpn-panel"
-    echo "   • Stop: sudo systemctl stop vpn-panel"
-    echo "   • Status: sudo systemctl status vpn-panel"
-    echo "   • Logs: sudo journalctl -u vpn-panel -f"
+    echo "🔧 PANEL MANAGEMENT:"
+    echo "   • Status: owpanel status (or just: owpanel)"
+    echo "   • Restart: sudo owpanel restart"
+    echo "   • Start: sudo owpanel start"
+    echo "   • Stop: sudo owpanel stop"
+    echo "   • Logs: owpanel logs"
     echo ""
     echo "📁 FILES LOCATION:"
     echo "   • Application: /var/lib/vpn-panel"
