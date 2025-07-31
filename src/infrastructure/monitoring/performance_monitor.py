@@ -175,4 +175,5 @@ class PerformanceMonitor:
                 "status": "healthy",
                 "message": "System is performing well",
                 "metrics": current_metrics
-            } 
+            }
+performance_monitor = PerformanceMonitor() 
