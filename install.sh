@@ -726,15 +726,35 @@ EOF
 
 
 
-# Function to start services
+# ===== START SERVICES =====
 start_services() {
     print_status "Starting services..."
     
-    # Start Redis
-    systemctl enable redis-server
-    systemctl start redis-server
+    # Start Redis with error handling
+    print_status "Configuring Redis..."
+    if systemctl enable redis-server >/dev/null 2>&1 && systemctl start redis-server >/dev/null 2>&1; then
+        print_success "Redis started successfully"
+    else
+        print_warning "Redis failed to start - using fallback configuration"
+        # Create minimal Redis config for VPN Panel
+        mkdir -p /etc/redis-fallback
+        cat > /etc/redis-fallback/redis.conf << EOF
+port 6379
+bind 127.0.0.1
+timeout 0
+save 900 1
+save 300 10
+save 60 10000
+maxmemory 64mb
+maxmemory-policy allkeys-lru
+EOF
+        # Try to start Redis with custom config
+        redis-server /etc/redis-fallback/redis.conf --daemonize yes >/dev/null 2>&1 || true
+        print_warning "Redis may not be available - panel will use file-based caching"
+    fi
     
     # Start VPN Panel
+    print_status "Starting VPN Panel..."
     systemctl daemon-reload
     systemctl enable vpn-panel
     systemctl start vpn-panel
