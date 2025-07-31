@@ -811,39 +811,46 @@ EOF
     # ===== START OPENVPN SERVICE =====
     print_status "Starting OpenVPN services..."
     
-    # Finally, restart and enable OpenVPN (exactly like angristan)
-    if [[ $OS == 'arch' || $OS == 'fedora' || $OS == 'centos' || $OS == 'oracle' ]]; then
-        # Don't modify package-provided service
-        if [[ -f /usr/lib/systemd/system/openvpn-server@.service ]]; then
-            cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service >/dev/null 2>&1
-            
-            # Workaround to fix OpenVPN service on OpenVZ
-            sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
-            # Another workaround to keep using /etc/openvpn/
-            sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
-            
-            systemctl daemon-reload
-            systemctl enable openvpn-server@server >/dev/null 2>&1
-            systemctl restart openvpn-server@server >/dev/null 2>&1
-        else
-            # Fallback to regular openvpn service
-            systemctl enable openvpn@server >/dev/null 2>&1 
-            systemctl restart openvpn@server >/dev/null 2>&1
-        fi
-    else
-        # Don't modify package-provided service  
-        if [[ -f /lib/systemd/system/openvpn@.service ]]; then
-            cp /lib/systemd/system/openvpn@.service /etc/systemd/system/openvpn@.service >/dev/null 2>&1
-            
-            # Workaround to fix OpenVPN service on OpenVZ
-            sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn@.service 2>/dev/null
-            # Another workaround to keep using /etc/openvpn/
-            sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn@.service 2>/dev/null
-        fi
+    # Finally, restart and enable OpenVPN (auto-detect service type)
+    
+    # Check what OpenVPN service is available
+    if [[ -f /usr/lib/systemd/system/openvpn-server@.service ]]; then
+        # Modern OpenVPN with separate server service (CentOS/RHEL/Fedora/Arch)
+        cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service >/dev/null 2>&1
+        
+        # Workaround to fix OpenVPN service on OpenVZ
+        sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
+        # Another workaround to keep using /etc/openvpn/
+        sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
+        
+        systemctl daemon-reload
+        systemctl enable openvpn-server@server >/dev/null 2>&1
+        systemctl restart openvpn-server@server >/dev/null 2>&1
+        OPENVPN_SERVICE="openvpn-server@server"
+        
+    elif [[ -f /lib/systemd/system/openvpn@.service ]]; then
+        # Template service (older systems)
+        cp /lib/systemd/system/openvpn@.service /etc/systemd/system/openvpn@.service >/dev/null 2>&1
+        
+        # Workaround to fix OpenVPN service on OpenVZ
+        sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn@.service 2>/dev/null
+        # Another workaround to keep using /etc/openvpn/
+        sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn@.service 2>/dev/null
         
         systemctl daemon-reload
         systemctl enable openvpn@server >/dev/null 2>&1
         systemctl restart openvpn@server >/dev/null 2>&1
+        OPENVPN_SERVICE="openvpn@server"
+        
+    elif systemctl list-unit-files | grep -q "openvpn.service"; then
+        # SysV-style service (Ubuntu 22.04 and similar)
+        systemctl enable openvpn >/dev/null 2>&1
+        systemctl restart openvpn >/dev/null 2>&1
+        OPENVPN_SERVICE="openvpn"
+        
+    else
+        print_error "No compatible OpenVPN service found"
+        return 1
     fi
     
     # Additional debug: Verify server config
@@ -859,11 +866,13 @@ EOF
     sleep 3
     
     # Check if OpenVPN started successfully
-    if systemctl is-active --quiet openvpn@server; then
+    if systemctl is-active --quiet $OPENVPN_SERVICE; then
         print_success "OpenVPN setup completed successfully!"
+        print_status "OpenVPN service: $OPENVPN_SERVICE is running"
         return 0
     else
         print_error "OpenVPN failed to start"
+        print_error "Service status: $(systemctl is-active $OPENVPN_SERVICE)"
         return 1
     fi
 }
