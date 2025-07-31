@@ -262,10 +262,15 @@ setup_python_env() {
 setup_wireguard() {
     print_status "Setting up WireGuard..."
     
-    # Enable IP forwarding
-    echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
-    echo 'net.ipv6.conf.all.forwarding=1' >> /etc/sysctl.conf
-    sysctl -p
+    # Enable IP forwarding (check if not already set)
+    if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+        echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+    fi
+    if ! grep -q "net.ipv6.conf.all.forwarding=1" /etc/sysctl.conf; then
+        echo 'net.ipv6.conf.all.forwarding=1' >> /etc/sysctl.conf
+    fi
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
+    sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1
     
     # Create WireGuard directory
     mkdir -p /etc/wireguard
@@ -352,6 +357,8 @@ set_var EASYRSA_CURVE prime256v1
 set_var EASYRSA_CA_EXPIRE 3650
 set_var EASYRSA_CERT_EXPIRE 3650
 set_var EASYRSA_CRL_DAYS 3650
+set_var EASYRSA_BATCH 1
+set_var EASYRSA_REQ_CN "OpenVPN-CA"
 EOF
     
     # ===== GENERATE CERTIFICATES =====
@@ -525,8 +532,12 @@ EOF
     # ===== ENABLE IP FORWARDING =====
     print_status "Enabling IP forwarding..."
     
-    echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
-    sysctl --system
+    # Only create OpenVPN sysctl config if not already configured
+    if [ ! -f /etc/sysctl.d/99-openvpn.conf ]; then
+        echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
+    fi
+    # Apply only OpenVPN specific settings silently
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
     
     # ===== START SERVICES =====
     print_status "Starting OpenVPN services..."
@@ -604,49 +615,91 @@ create_vpn_panel_app() {
     
     cd /var/lib/vpn-panel
     
-    # Create application structure
-    mkdir -p src/{domain/{entities,repositories,services},application/{use_cases,dto},infrastructure/{database,protocols,monitoring,security,caching,analytics,traffic},presentation/{api,templates}}
-    mkdir -p static/{css,js}
-    mkdir -p templates
-    mkdir -p tests/{unit,integration}
+    # Download complete source code from GitHub
+    print_status "Downloading VPN Panel source code..."
     
-    # Create main application file
-    cat > main.py << 'EOF'
+    # Download the complete source code
+    wget -q -O vpn-panel-source.zip "https://github.com/smaghili/vpn-panel/archive/main.zip"
+    unzip -q vpn-panel-source.zip
+    
+    # Copy source files
+    if [ -d "vpn-panel-main/src" ]; then
+        cp -r vpn-panel-main/src ./
+        cp -r vpn-panel-main/static ./ 2>/dev/null || mkdir -p static/{css,js}
+        cp -r vpn-panel-main/templates ./ 2>/dev/null || mkdir -p templates
+        cp -r vpn-panel-main/tests ./ 2>/dev/null || mkdir -p tests/{unit,integration}
+        cp vpn-panel-main/requirements.txt ./ 2>/dev/null || true
+        cp vpn-panel-main/pytest.ini ./ 2>/dev/null || true
+        print_success "Source code downloaded successfully"
+    else
+        print_warning "GitHub source not found - creating minimal structure"
+        # Fallback: create basic structure
+        mkdir -p src/{domain/{entities,repositories,services},application/{use_cases,dto},infrastructure/{database,protocols,monitoring,security,caching,analytics,traffic},presentation/{api,templates}}
+        mkdir -p static/{css,js}
+        mkdir -p templates  
+        mkdir -p tests/{unit,integration}
+    fi
+    
+    # Copy script files if available (before cleanup)
+    if [ -f "vpn-panel-main/scripts/main.py" ]; then
+        cp vpn-panel-main/scripts/main.py main.py
+        print_success "Main application script copied from source"
+    else
+        # Fallback: create minimal main.py
+        cat > main.py << 'EOF'
 #!/usr/bin/env python3
-"""
-VPN Panel - Enterprise Edition
-Main application entry point
-"""
-
-import os
-import sys
-import asyncio
-import uvicorn
+import sys, os
 from pathlib import Path
-
-# Add src to Python path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from src.presentation.api.main import app
-from src.infrastructure.monitoring.background_monitor import background_monitor
-
-async def main():
-    """Main application function"""
-    # Start background monitoring
-    await background_monitor.start_monitoring()
-    
-    # Get configuration
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
-    
-    # Start server
-    config = uvicorn.Config(app, host=host, port=port, log_level="info")
-    server = uvicorn.Server(config)
-    await server.serve()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+try:
+    from src.presentation.api.main import app
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+except ImportError as e:
+    print(f"VPN Panel modules not found: {e}")
+    sys.exit(1)
 EOF
+        print_warning "Created fallback main.py"
+    fi
+    
+    # Copy admin user creation script if available
+    if [ -f "vpn-panel-main/scripts/create_admin.py" ]; then
+        cp vpn-panel-main/scripts/create_admin.py create_admin.py
+        print_success "Admin user script copied from source"
+    else
+        # Fallback: create minimal create_admin.py
+        cat > create_admin.py << 'EOF'
+#!/usr/bin/env python3
+import sys, sqlite3, bcrypt, uuid
+if len(sys.argv) != 3:
+    print("Usage: python3 create_admin.py <username> <password>")
+    sys.exit(1)
+
+username, password = sys.argv[1], sys.argv[2]
+conn = sqlite3.connect('/var/lib/vpn-panel/users.db')
+cursor = conn.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY, username TEXT UNIQUE, email TEXT,
+    password_hash TEXT, role TEXT DEFAULT 'user', status TEXT DEFAULT 'active'
+)''')
+password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+try:
+    cursor.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)',
+                  (str(uuid.uuid4()), username, 'admin@vpn-panel.local',
+                   password_hash, 'admin', 'active'))
+    conn.commit()
+    print("✅ Admin user created successfully!")
+except sqlite3.IntegrityError:
+    print("⚠️  Admin user already exists")
+conn.close()
+EOF
+        print_warning "Created fallback create_admin.py"
+    fi
+    
+    # Cleanup after copying all files
+    rm -f vpn-panel-source.zip
+    rm -rf vpn-panel-main
     
     # Create systemd service
     cat > /etc/systemd/system/vpn-panel.service << EOF
@@ -675,46 +728,6 @@ ReadWritePaths=/var/lib/vpn-panel /etc/vpn-panel /var/log/vpn-panel
 
 [Install]
 WantedBy=multi-user.target
-EOF
-    
-    # Create admin user script
-    cat > create_admin.py << EOF
-#!/usr/bin/env python3
-import sys
-import os
-sys.path.insert(0, '/var/lib/vpn-panel/src')
-
-from src.infrastructure.database.unified_user_repository import UnifiedUserRepository
-from src.domain.services.auth_service import AuthService
-from src.domain.entities.user_profile import UserProfile, ProtocolType
-import uuid
-
-def create_admin_user():
-    """Create admin user"""
-    # Initialize repository and auth service
-    repo = UnifiedUserRepository('/var/lib/vpn-panel/users.db')
-    auth_service = AuthService()
-    
-    # Create admin user profile
-    admin_user = UserProfile(
-        user_id=str(uuid.uuid4()),
-        username='$ADMIN_USERNAME',
-        email='admin@vpn-panel.local',
-        password_hash=auth_service.hash_password('$ADMIN_PASSWORD'),
-        role='admin',
-        status='active'
-    )
-    
-    # Save admin user
-    if repo.save_user(admin_user):
-        print("Admin user created successfully!")
-        print(f"Username: $ADMIN_USERNAME")
-        print(f"Password: $ADMIN_PASSWORD")
-    else:
-        print("Failed to create admin user")
-
-if __name__ == "__main__":
-    create_admin_user()
 EOF
     
     # Make scripts executable
@@ -878,7 +891,7 @@ create_admin_user() {
     
     cd /var/lib/vpn-panel
     source venv/bin/activate
-    python create_admin.py
+    python create_admin.py "$ADMIN_USERNAME" "$ADMIN_PASSWORD"
     
     print_success "Admin user created successfully"
 }
