@@ -211,9 +211,12 @@ get_user_input() {
 # ===== SILENT SYSTEM UPDATE =====
 update_system() {
     print_status "Updating system packages..."
-    apt-get update >/dev/null 2>&1
-    apt-get upgrade -y >/dev/null 2>&1
-    print_success "System updated successfully"
+    if apt-get update >/dev/null 2>&1 && apt-get upgrade -y >/dev/null 2>&1; then
+        print_success "System updated successfully"
+        return 0
+    else
+        return 1
+    fi
 }
 
 # ===== SILENT PACKAGE INSTALLATION =====
@@ -252,6 +255,7 @@ install_system_deps() {
     silent_install python3-psutil python3-redis python3-websockets python3-cryptography
     
     print_success "System dependencies installed successfully"
+    return 0
 }
 
 # Function to create directories
@@ -274,6 +278,7 @@ create_directories() {
     chmod 700 /etc/vpn-panel
     
     print_success "Directories created successfully"
+    return 0
 }
 
 # ===== SILENT PYTHON ENVIRONMENT =====
@@ -308,6 +313,7 @@ setup_python_env() {
     silent_pip_install structlog python-json-logger
     
     print_success "Python environment setup completed"
+    return 0
 }
 
 # Function to setup WireGuard
@@ -350,6 +356,7 @@ EOF
     systemctl start wg-quick@wg0
     
     print_success "WireGuard setup completed"
+    return 0
 }
 
 # ===== OPENVPN SETUP FUNCTION =====
@@ -610,13 +617,10 @@ EOF
     # Check if OpenVPN started successfully
     if systemctl is-active --quiet openvpn@server; then
         print_success "OpenVPN setup completed successfully!"
-        print_status "OpenVPN is running on port $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
-        print_status "Server certificate: $SERVER_NAME"
-        print_status "Encryption: AES-128-GCM with ECDSA certificates"
+        return 0
     else
-        print_error "OpenVPN failed to start. Checking logs..."
-        journalctl -u openvpn@server --no-pager -l
-        exit 1
+        print_error "OpenVPN failed to start"
+        return 1
     fi
 }
 
@@ -658,6 +662,7 @@ EOF
     chmod 440 /etc/sudoers.d/vpn-panel
     
     print_success "Security setup completed"
+    return 0
 }
 
 # Function to create VPN Panel application
@@ -819,6 +824,7 @@ EOF
     fi
     
     print_success "VPN Panel application created successfully"
+    return 0
 }
 
 
@@ -1026,15 +1032,46 @@ main() {
     # Get user input
     get_user_input
     
-    # Run installation steps
-    update_system
-    install_system_deps
-    create_directories
-    setup_python_env
-    setup_wireguard
-    setup_openvpn
-    setup_security
-    create_vpn_panel_app
+    # Run installation steps with error checking
+    if ! update_system; then
+        print_error "System update failed"
+        exit 1
+    fi
+    
+    if ! install_system_deps; then
+        print_error "System dependencies installation failed"
+        exit 1
+    fi
+    
+    if ! create_directories; then
+        print_error "Directory creation failed"
+        exit 1
+    fi
+    
+    if ! setup_python_env; then
+        print_error "Python environment setup failed"
+        exit 1
+    fi
+    
+    if ! setup_wireguard; then
+        print_error "WireGuard setup failed"
+        exit 1
+    fi
+    
+    if ! setup_openvpn; then
+        print_error "OpenVPN setup failed"
+        exit 1
+    fi
+    
+    if ! setup_security; then
+        print_error "Security setup failed"
+        exit 1
+    fi
+    
+    if ! create_vpn_panel_app; then
+        print_error "VPN Panel application creation failed"
+        exit 1
+    fi
     
     # Start services and check success
     if start_services; then
