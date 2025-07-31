@@ -119,10 +119,7 @@ get_user_input() {
         OPENVPN_PROTOCOL="tcp"
         WIREGUARD_PORT="51820"
         
-        echo ""
         print_success "Auto-generated configuration created"
-        echo ""
-        read -p "Press ENTER to continue with installation..."
         
     else
         # MANUAL MODE - Ask user for everything
@@ -208,13 +205,6 @@ get_user_input() {
         print_success "Configuration complete!"
     fi
     
-    echo ""
-    print_status "Installation will proceed with:"
-    echo "  👤 Admin Username: $ADMIN_USERNAME"
-    echo "  🌐 Panel Port: $PORT"
-    echo "  🔒 OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
-    echo "  🔒 WireGuard Port: $WIREGUARD_PORT (udp)"
-    echo ""
     print_status "Starting installation..."
 }
 
@@ -799,7 +789,33 @@ EOF
     if [ -f "scripts/owpanel.py" ]; then
         chmod +x scripts/owpanel.py
         ln -sf /var/lib/vpn-panel/scripts/owpanel.py /usr/local/bin/owpanel
-        print_success "OWPanel management tool installed"
+        
+        # Create bash completion for owpanel
+        cat > /etc/bash_completion.d/owpanel << 'EOF'
+# Bash completion for owpanel
+_owpanel_completion() {
+    local cur prev
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    # Available commands
+    local commands="status logs restart start stop help"
+    
+    if [[ ${COMP_CWORD} == 1 ]]; then
+        COMPREPLY=($(compgen -W "${commands}" -- ${cur}))
+    fi
+}
+
+# Register completion for both owpanel and owp
+complete -F _owpanel_completion owpanel
+complete -F _owpanel_completion owp
+EOF
+        
+        # Create short alias 'owp' for owpanel
+        ln -sf /var/lib/vpn-panel/scripts/owpanel.py /usr/local/bin/owp
+        
+        print_success "OWPanel management tool installed (owpanel or owp)"
     fi
     
     print_success "VPN Panel application created successfully"
@@ -958,13 +974,7 @@ display_final_info() {
     echo "   1. Open browser and go to: http://$(curl -s ifconfig.me):$PORT"
     echo "   2. Login with the credentials above"
     echo "   3. Start creating VPN users and servers"
-    echo ""
-    echo "🔧 PANEL MANAGEMENT:"
-    echo "   • Status: owpanel status (or just: owpanel)"
-    echo "   • Restart: sudo owpanel restart"
-    echo "   • Start: sudo owpanel start"
-    echo "   • Stop: sudo owpanel stop"
-    echo "   • Logs: owpanel logs"
+
     echo ""
     echo "📁 FILES LOCATION:"
     echo "   • Application: /var/lib/vpn-panel"
