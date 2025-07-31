@@ -249,7 +249,7 @@ setup_python_env() {
     
     # Install Python dependencies silently
     silent_pip_install fastapi uvicorn jinja2 python-multipart
-    silent_pip_install bcrypt pydantic "python-jose[cryptography]"
+    silent_pip_install bcrypt pydantic "python-jose[cryptography]" PyJWT
     silent_pip_install redis psutil websockets
     silent_pip_install cryptography pycryptodome
     silent_pip_install pytest pytest-asyncio httpx
