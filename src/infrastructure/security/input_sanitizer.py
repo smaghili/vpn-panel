@@ -50,18 +50,7 @@ class InputSanitizer:
         
         return value
     
-    def sanitize_email(self, email: str) -> str:
-        """Sanitize email input"""
-        if not email:
-            return ""
-        
-        email = email.lower().strip()
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        
-        if not re.match(email_pattern, email):
-            raise ValueError("Invalid email format")
-        
-        return email
+        # Email functionality removed - no longer needed
     
     def sanitize_url(self, url: str) -> str:
         """Sanitize URL input"""

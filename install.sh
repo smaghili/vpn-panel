@@ -1089,12 +1089,25 @@ start_services() {
     # Setup Redis
     systemctl stop redis-server 2>/dev/null || true
     pkill redis-server 2>/dev/null || true
-    rm -rf /var/lib/redis/* 2>/dev/null || true
     
+    # Stop any conflicting Docker Redis containers
+    if command -v docker >/dev/null 2>&1; then
+        docker stop redis 2>/dev/null || true
+        docker rm redis 2>/dev/null || true
+    fi
+    
+    # Kill any process using port 6379
     if netstat -tuln | grep -q ":6379 "; then
         fuser -k 6379/tcp 2>/dev/null || true
-        sleep 1
+        sleep 2
     fi
+    
+    # Clean and create Redis directories
+    rm -rf /var/lib/redis/* 2>/dev/null || true
+    mkdir -p /var/lib/redis
+    mkdir -p /var/log/redis
+    mkdir -p /var/run/redis
+    
     if [ -f /etc/redis/redis.conf ]; then
         # Backup original config
         cp /etc/redis/redis.conf /etc/redis/redis.conf.backup
@@ -1126,10 +1139,12 @@ EOF
     fi
     
     # Ensure proper ownership and permissions
-    chown redis:redis /var/lib/redis
-    chown redis:redis /var/log/redis
-    chmod 750 /var/lib/redis
-    chmod 750 /var/log/redis
+    chown redis:redis /var/lib/redis 2>/dev/null || true
+    chown redis:redis /var/log/redis 2>/dev/null || true
+    chown redis:redis /var/run/redis 2>/dev/null || true
+    chmod 755 /var/lib/redis
+    chmod 755 /var/log/redis
+    chmod 755 /var/run/redis
     
     # Try to start Redis
     print_status "Starting Redis server..."

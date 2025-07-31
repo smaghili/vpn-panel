@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
@@ -13,14 +13,12 @@ class LoginResponse(BaseModel):
 
 class UserCreateRequest(BaseModel):
     username: str
-    email: EmailStr
     password: str
     role: str = "user"
     expire_date: Optional[datetime] = None
 
 class UserUpdateRequest(BaseModel):
     username: Optional[str] = None
-    email: Optional[EmailStr] = None
     role: Optional[str] = None
     status: Optional[str] = None
     expire_date: Optional[datetime] = None
@@ -28,7 +26,6 @@ class UserUpdateRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     username: str
-    email: str
     role: str
     status: str
     created_at: datetime

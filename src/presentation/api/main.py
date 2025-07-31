@@ -333,7 +333,6 @@ async def login(request: Request, username: str = Form(...), password: str = For
         user_data = {
             "id": user.id,
             "username": user.username,
-            "email": user.email,
             "role": user.role.value,
             "status": user.status.value
         }
@@ -349,7 +348,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
             user=UserResponse(
                 id=user.id,
                 username=user.username,
-                email=user.email,
+                
                 role=user.role.value,
                 status=user.status.value,
                 created_at=user.created_at,
@@ -373,7 +372,7 @@ async def get_current_user_info(user: User = Depends(get_current_user)):
     return UserResponse(
         id=user.id,
         username=user.username,
-        email=user.email,
+        
         role=user.role.value,
         status=user.status.value,
         created_at=user.created_at,
@@ -388,7 +387,7 @@ async def get_users(admin: User = Depends(require_admin)):
         UserResponse(
             id=user.id,
             username=user.username,
-            email=user.email,
+            
             role=user.role.value,
             status=user.status.value,
             created_at=user.created_at,
@@ -404,7 +403,6 @@ async def create_user(
 ):
     user = create_user_use_case.execute(
         user_data.username,
-        user_data.email,
         user_data.password,
         user_data.role
     )
@@ -433,7 +431,7 @@ async def get_user(user_id: str, current_user: User = Depends(get_current_user))
     return UserResponse(
         id=user.id,
         username=user.username,
-        email=user.email,
+        
         role=user.role.value,
         status=user.status.value,
         created_at=user.created_at,

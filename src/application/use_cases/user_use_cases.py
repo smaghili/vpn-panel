@@ -8,17 +8,13 @@ class CreateUserUseCase:
     def __init__(self, user_repository: UserRepository):
         self.user_repository = user_repository
     
-    def execute(self, username: str, email: str, password: str, role: str = "user") -> Optional[User]:
+    def execute(self, username: str, password: str, role: str = "user") -> Optional[User]:
         if self.user_repository.find_by_username(username):
-            return None
-        
-        if self.user_repository.find_by_email(email):
             return None
         
         user = User(
             id=str(uuid.uuid4()),
             username=username,
-            email=email,
             password_hash=User.hash_password(password),
             role=UserRole(role),
             status=UserStatus.ACTIVE,
@@ -45,11 +41,7 @@ class UpdateUserUseCase:
                 return False
             user.username = kwargs['username']
         
-        if 'email' in kwargs:
-            existing_user = self.user_repository.find_by_email(kwargs['email'])
-            if existing_user and existing_user.id != user_id:
-                return False
-            user.email = kwargs['email']
+
         
         if 'role' in kwargs:
             user.role = UserRole(kwargs['role'])
@@ -80,8 +72,7 @@ class GetUserUseCase:
     def by_username(self, username: str) -> Optional[User]:
         return self.user_repository.find_by_username(username)
     
-    def by_email(self, email: str) -> Optional[User]:
-        return self.user_repository.find_by_email(email)
+
 
 class ListUsersUseCase:
     def __init__(self, user_repository: UserRepository):

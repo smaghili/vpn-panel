@@ -20,7 +20,6 @@ class UserStatus(Enum):
 class User:
     id: str
     username: str
-    email: str
     password_hash: str
     role: UserRole
     status: UserStatus
@@ -30,7 +29,7 @@ class User:
     expire_date: Optional[datetime] = None
     
     def validate(self) -> bool:
-        return bool(self.username and self.email and self.password_hash)
+        return bool(self.username and self.password_hash)
     
     def is_active(self) -> bool:
         return self.status == UserStatus.ACTIVE
