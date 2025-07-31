@@ -61,7 +61,7 @@ def get_panel_url():
         # Get port from service file
         success, output, _ = run_command("grep 'Environment=PORT=' /etc/systemd/system/vpn-panel.service")
         if success and "PORT=" in output:
-            port = output.split("PORT=")[1].split()[0]
+            port = output.split("PORT=")[1].strip()
         else:
             port = "8000"
         
@@ -74,13 +74,14 @@ def show_status():
     print(f"\n{BLUE}📊 VPN Panel System Status{NC}")
     print("=" * 50)
     
-    # Panel Status
-    panel_status = check_service_status("vpn-panel")
+    success, _, _ = run_command(f"curl -s --connect-timeout 3 localhost:8000")
+    panel_status = "Running" if success else "Not Responding"
+    panel_color = GREEN if success else RED
+    
     panel_enabled = check_service_enabled("vpn-panel")
-    panel_color = GREEN if panel_status == "Running" else RED
     auto_color = GREEN if panel_enabled == "Yes" else YELLOW
     
-    print(f"Panel state: {panel_color}{panel_status}{NC}")
+    print(f"Panel State: {panel_color}{panel_status}{NC}")
     print(f"Start automatically: {auto_color}{panel_enabled}{NC}")
     
     # Service Status
@@ -119,12 +120,6 @@ def show_status():
     # Quick health check
     print(f"\n{BLUE}🔍 Quick Health Check{NC}")
     print("-" * 30)
-    
-    # Check if panel responds
-    success, _, _ = run_command(f"curl -s --connect-timeout 3 {panel_url.replace('http://', 'http://localhost:').split(':')[0]}:8000")
-    health_color = GREEN if success else RED
-    health_status = "Healthy" if success else "Not Responding"
-    print(f"Panel Response: {health_color}{health_status}{NC}")
     
     # Check database
     db_exists = os.path.exists("/var/lib/vpn-panel/vpn_panel.db")

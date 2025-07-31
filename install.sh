@@ -696,8 +696,8 @@ verb 3" >> /etc/openvpn/server.conf
     # SELinux configuration (like angristan)
     if hash sestatus 2>/dev/null; then
         if sestatus | grep "Current mode" | grep -qs "enforcing"; then
-            if [[ $PORT != '1194' ]]; then
-                semanage port -a -t openvpn_port_t -p "$PROTOCOL" "$PORT" >/dev/null 2>&1
+            if [[ $OPENVPN_PORT != '1194' ]]; then
+                semanage port -a -t openvpn_port_t -p "$PROTOCOL" "$OPENVPN_PORT" >/dev/null 2>&1
             fi
         fi
     fi
@@ -713,7 +713,7 @@ verb 3" >> /etc/openvpn/server.conf
     elif [[ $PROTOCOL == 'tcp' ]]; then
         echo "proto tcp-client" >> /etc/openvpn/client-template.txt
     fi
-    echo "remote $PUBLIC_IP $PORT
+    echo "remote $PUBLIC_IP $OPENVPN_PORT
 dev tun
 resolv-retry infinite
 nobind
@@ -1015,7 +1015,7 @@ Type=exec
 User=vpn-panel
 Group=vpn-panel
 WorkingDirectory=/var/lib/vpn-panel
-Environment=PATH=/var/lib/vpn-panel/venv/bin
+Environment=PATH=/var/lib/vpn-panel/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONPATH=/var/lib/vpn-panel/src
 Environment=DB_PATH=/var/lib/vpn-panel/vpn_panel.db
 Environment=REDIS_URL=redis://localhost:6379
@@ -1040,18 +1040,15 @@ EOF
     # Install owpanel management tool
     if [ -f "scripts/owpanel.py" ]; then
         chmod +x scripts/owpanel.py
-        ln -sf /var/lib/vpn-panel/scripts/owpanel.py /usr/local/bin/owpanel
+
         
-        # Create bash completion for owpanel
-        cat > /etc/bash_completion.d/owpanel << 'EOF'
-# Bash completion for owpanel
-_owpanel_completion() {
+        cat > /etc/bash_completion.d/owp << 'EOF'
+_owp_completion() {
     local cur prev
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    # Available commands
     local commands="status logs restart start stop help"
     
     if [[ ${COMP_CWORD} == 1 ]]; then
@@ -1059,15 +1056,12 @@ _owpanel_completion() {
     fi
 }
 
-# Register completion for both owpanel and owp
-complete -F _owpanel_completion owpanel
-complete -F _owpanel_completion owp
+complete -F _owp_completion owp
 EOF
         
-        # Create short alias 'owp' for owpanel
         ln -sf /var/lib/vpn-panel/scripts/owpanel.py /usr/local/bin/owp
         
-        print_success "OWPanel management tool installed (owpanel or owp)"
+        print_success "OWP management tool installed (owp)"
     fi
     
     print_success "VPN Panel application created successfully"
@@ -1222,58 +1216,9 @@ display_final_info() {
     fi
     
     echo ""
-    echo "=================================================================="
-    echo "🎉            VPN PANEL - INSTALLATION COMPLETE            🎉"
-    echo "=================================================================="
-    echo ""
-    echo "📋 SYSTEM INFORMATION:"
-    echo "   • Panel URL: http://$(curl -s ifconfig.me):$PORT"
-    echo "   • Panel Port: $PORT"
-    echo "   • WireGuard Port: $WIREGUARD_PORT (udp)"
-    echo "   • OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
-    echo ""
-    echo "🔐 ADMIN CREDENTIALS:"
-    echo "   • Username: $ADMIN_USERNAME"
-    echo "   • Password: $ADMIN_PASSWORD"
-    echo ""
-    echo "⚠️  IMPORTANT: Save these credentials securely!"
-    echo ""
-    echo "🚀 NEXT STEPS:"
-    echo "   1. Open browser and go to: http://$(curl -s ifconfig.me):$PORT"
-    echo "   2. Login with the credentials above"
-    echo "   3. Start creating VPN users and servers"
-
-    echo ""
-    echo "📁 FILES LOCATION:"
-    echo "   • Application: /var/lib/vpn-panel"
-    echo "   • Logs: /var/log/vpn-panel"
-    echo "   • Config: /etc/vpn-panel"
-    echo "   • Credentials: /root/vpn-panel-credentials.txt"
-    echo ""
-    echo "📚 DOCUMENTATION:"
-    echo "   • GitHub: https://github.com/smaghili/vpn-panel"
-    echo "   • Support: Create an issue on GitHub"
-    echo ""
-    echo "=================================================================="
-    
-    # Save credentials to file for reference
-    cat > /root/vpn-panel-credentials.txt << EOF
-VPN Panel Installation - $(date)
-================================
-
-Panel URL: http://$(curl -s ifconfig.me):$PORT
-Admin Username: $ADMIN_USERNAME
-Admin Password: $ADMIN_PASSWORD
-Panel Port: $PORT
-WireGuard Port: $WIREGUARD_PORT (udp)
-OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)
-
-Installation Date: $(date)
-Server IP: $(curl -s ifconfig.me)
-EOF
-    
-    chmod 600 /root/vpn-panel-credentials.txt
-    echo "💾 Credentials saved to: /root/vpn-panel-credentials.txt"
+    echo "Panel URL: http://$(curl -s ifconfig.me):$PORT"
+    echo "Username: $ADMIN_USERNAME"
+    echo "Password: $ADMIN_PASSWORD"
     echo ""
     
     print_success "Installation completed! Panel is ready to use."
