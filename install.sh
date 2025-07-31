@@ -931,14 +931,8 @@ create_vpn_panel_app() {
     wget -q -O vpn-panel-source.zip "https://github.com/smaghili/vpn-panel/archive/main.zip"
     unzip -q vpn-panel-source.zip
     
-    # Copy source files
-    if [ -d "vpn-panel-main/src" ]; then
-        cp -r vpn-panel-main/src ./
-        cp -r vpn-panel-main/static ./ 2>/dev/null || mkdir -p static/{css,js}
-        cp -r vpn-panel-main/templates ./ 2>/dev/null || mkdir -p templates
-        cp -r vpn-panel-main/tests ./ 2>/dev/null || mkdir -p tests/{unit,integration}
-        cp vpn-panel-main/requirements.txt ./ 2>/dev/null || true
-        cp vpn-panel-main/pytest.ini ./ 2>/dev/null || true
+    if [ -d "vpn-panel-main" ]; then
+        cp -r vpn-panel-main/* ./
         print_success "Source code downloaded successfully"
     else
         print_warning "GitHub source not found - creating minimal structure"
