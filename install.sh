@@ -153,12 +153,7 @@ get_user_input() {
     echo "  OpenVPN Port: $OPENVPN_PORT"
     echo "  OpenVPN Protocol: $OPENVPN_PROTOCOL"
     echo ""
-    
-    read -p "Continue with installation? (y/N): " CONFIRM
-    if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
-        print_warning "Installation cancelled"
-        exit 0
-    fi
+    print_status "Starting installation..."
 }
 
 # ===== SILENT SYSTEM UPDATE =====
@@ -381,14 +376,13 @@ EOF
     EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
     
     # Generate tls-crypt key
-    openvpn --genkey secret /etc/openvpn/tls-crypt.key
+    openvpn --genkey secret tls-crypt.key
     
     # ===== COPY CERTIFICATES =====
     print_status "Installing certificates..."
     
     # Copy certificates to OpenVPN directory
-    cp pki/ca.crt pki/private/ca.key "pki/issued/$SERVER_NAME.crt" "pki/private/$SERVER_NAME.key" pki/crl.pem /etc/openvpn/
-    cp /etc/openvpn/tls-crypt.key /etc/openvpn/
+    cp pki/ca.crt pki/private/ca.key "pki/issued/$SERVER_NAME.crt" "pki/private/$SERVER_NAME.key" pki/crl.pem tls-crypt.key /etc/openvpn/
     
     # Set proper permissions
     chmod 644 /etc/openvpn/crl.pem
