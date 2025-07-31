@@ -116,7 +116,7 @@ get_user_input() {
         ADMIN_PASSWORD=$(generate_random_password 16)
         PORT="8000"
         OPENVPN_PORT="1194"
-        OPENVPN_PROTOCOL="tcp"
+        OPENVPN_PROTOCOL="udp"
         WIREGUARD_PORT="51820"
         
         print_success "Auto-generated configuration created"
@@ -187,7 +187,7 @@ get_user_input() {
         if [ "$PROTO_CHOICE" = "2" ]; then
             OPENVPN_PROTOCOL="udp"
         else
-            OPENVPN_PROTOCOL="tcp"
+            OPENVPN_PROTOCOL="udp"
         fi
         
         # Get WireGuard port
@@ -360,9 +360,37 @@ EOF
 }
 
 # ===== OPENVPN SETUP FUNCTION =====
-# Complete OpenVPN installation based on angristan/openvpn-install
+# Complete OpenVPN installation exactly like angristan/openvpn-install but automated
 setup_openvpn() {
     print_status "Setting up OpenVPN with professional configuration..."
+    
+    # ===== AUTO CONFIGURATION (like angristan but automated) =====
+    # Set default choices automatically (no questions asked)
+    IPV6_SUPPORT="n"
+    # Check for IPv6 connectivity
+    if type ping6 >/dev/null 2>&1; then
+        if ping6 -c3 ipv6.google.com >/dev/null 2>&1; then
+            IPV6_SUPPORT="y"
+        fi
+    elif ping -6 -c3 ipv6.google.com >/dev/null 2>&1; then
+        IPV6_SUPPORT="y"
+    fi
+    
+    # Auto configuration (angristan defaults)
+    PORT="$OPENVPN_PORT"
+    PROTOCOL="$OPENVPN_PROTOCOL"  # UDP by default
+    DNS="3"  # Cloudflare
+    COMPRESSION_ENABLED="n"  # Not recommended due to VORACLE
+    CIPHER="AES-128-GCM"  # Modern and fast
+    CERT_TYPE="1"  # ECDSA (recommended)
+    CERT_CURVE="prime256v1"
+    RSA_KEY_SIZE="2048"  # For RSA mode (fallback)
+    CC_CIPHER="TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256"
+    DH_TYPE="1"  # ECDH
+    DH_CURVE="prime256v1"
+    DH_KEY_SIZE="2048"  # For DH mode (fallback)
+    HMAC_ALG="SHA256"
+    TLS_SIG="1"  # tls-crypt
     
     # ===== COMPLETE CLEANUP OF EXISTING INSTALLATION =====
     print_status "Cleaning up any existing OpenVPN installation..."
@@ -408,50 +436,91 @@ setup_openvpn() {
     # Reload systemd
     systemctl daemon-reload
     
+    # ===== DETECT NETWORK INTERFACE =====
+    # Get the "public" interface from the default route (like angristan)
+    NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
+    if [[ -z $NIC ]] && [[ $IPV6_SUPPORT == 'y' ]]; then
+        NIC=$(ip -6 route show default | sed -ne 's/^default .* dev \([^ ]*\) .*$/\1/p')
+    fi
+    
+    # Detect public IP for client configuration (angristan method)
+    if [[ -z $PUBLIC_IP ]]; then
+        # Try multiple methods to get public IP
+        PUBLIC_IP=$(curl -f -m 5 -sS --retry 2 --retry-connrefused -4 https://api.seeip.org 2>/dev/null || \
+                   curl -f -m 5 -sS --retry 2 --retry-connrefused -4 https://ifconfig.me 2>/dev/null || \
+                   curl -f -m 5 -sS --retry 2 --retry-connrefused -4 https://api.ipify.org 2>/dev/null || \
+                   dig -4 TXT +short o-o.myaddr.l.google.com @ns1.google.com | tr -d '"')
+    fi
+    
+    # If still no IP, we have a problem
+    if [[ -z $PUBLIC_IP ]]; then
+        print_error "Could not detect public IP address"
+        return 1
+    fi
+    
     # ===== DETECT SYSTEM CONFIGURATION =====
-    # Find out if the machine uses nogroup or nobody for the permissionless group
+    # Find out if the machine uses nogroup or nobody for the permissionless group (like angristan)
     if grep -qs "^nogroup:" /etc/group; then
         NOGROUP=nogroup
     else
         NOGROUP=nobody
     fi
     
-    # Get the "public" interface from the default route
-    NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
-    if [[ -z $NIC ]]; then
-        NIC=$(ip -6 route show default | sed -ne 's/^default .* dev \([^ ]*\) .*$/\1/p')
+    # ===== INSTALL OPENVPN PACKAGE =====
+    print_status "Installing OpenVPN package..."
+    
+    # Install OpenVPN (exactly like angristan)
+    if [[ $OS =~ (debian|ubuntu) ]]; then
+        apt-get update >/dev/null 2>&1
+        apt-get -y install ca-certificates gnupg >/dev/null 2>&1
+        # Ubuntu > 16.04 and Debian > 8 have OpenVPN >= 2.4 without third party repository
+        apt-get install -y openvpn iptables openssl wget ca-certificates curl >/dev/null 2>&1
+    elif [[ $OS == 'centos' ]]; then
+        yum install -y epel-release >/dev/null 2>&1
+        yum install -y openvpn iptables openssl wget ca-certificates curl tar 'policycoreutils-python*' >/dev/null 2>&1
+    elif [[ $OS == 'oracle' ]]; then
+        yum install -y oracle-epel-release-el8 >/dev/null 2>&1
+        yum-config-manager --enable ol8_developer_EPEL >/dev/null 2>&1
+        yum install -y openvpn iptables openssl wget ca-certificates curl tar policycoreutils-python-utils >/dev/null 2>&1
+    elif [[ $OS == 'fedora' ]]; then
+        dnf install -y openvpn iptables openssl wget ca-certificates curl policycoreutils-python-utils >/dev/null 2>&1
+    elif [[ $OS == 'arch' ]]; then
+        pacman --needed --noconfirm -Syu openvpn iptables openssl wget ca-certificates curl >/dev/null 2>&1
     fi
     
-    # Detect public IP
-    PUBLIC_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s api.ipify.org 2>/dev/null || echo "")
+    # Remove old easy-rsa if exists (angristan cleanup)
+    if [[ -d /etc/openvpn/easy-rsa/ ]]; then
+        rm -rf /etc/openvpn/easy-rsa/
+    fi
     
     # ===== INSTALL EASY-RSA FROM SOURCE =====
     print_status "Installing Easy-RSA from source..."
     
-    # Download and install Easy-RSA
+    # Download and extract Easy-RSA (exactly like angristan)
     local version="3.1.2"
-    wget -O /tmp/easy-rsa.tgz "https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz"
+    wget -O /tmp/easy-rsa.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz >/dev/null 2>&1
     mkdir -p /etc/openvpn/easy-rsa
     tar xzf /tmp/easy-rsa.tgz --strip-components=1 --no-same-owner --directory /etc/openvpn/easy-rsa
     rm -f /tmp/easy-rsa.tgz
     
-    # ===== CONFIGURE EASY-RSA =====
-    cd /etc/openvpn/easy-rsa/
+    # Change to easy-rsa directory
+    cd /etc/openvpn/easy-rsa || return 1
     
-    # Configure for ECDSA certificates (modern and fast)
-    cat > vars << EOF
-set_var EASYRSA_ALGO ec
-set_var EASYRSA_CURVE prime256v1
-set_var EASYRSA_CA_EXPIRE 3650
-set_var EASYRSA_CERT_EXPIRE 3650
-set_var EASYRSA_CRL_DAYS 3650
-set_var EASYRSA_BATCH 1
-EOF
+    # Configure Easy-RSA variables (like angristan)
+    case $CERT_TYPE in
+    1)
+        echo "set_var EASYRSA_ALGO ec" > vars
+        echo "set_var EASYRSA_CURVE $CERT_CURVE" >> vars
+        ;;
+    2)
+        echo "set_var EASYRSA_KEY_SIZE $RSA_KEY_SIZE" > vars
+        ;;
+    esac
     
     # ===== GENERATE CERTIFICATES =====
     print_status "Generating certificates and keys..."
     
-    # Generate random server name
+    # Generate random server name (exactly like angristan)
     SERVER_CN="cn_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
     SERVER_NAME="server_$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
     
@@ -459,9 +528,14 @@ EOF
     echo "$SERVER_CN" > SERVER_CN_GENERATED
     echo "$SERVER_NAME" > SERVER_NAME_GENERATED
     
-    # Initialize PKI and create CA
+    # Initialize PKI and create CA (exactly like angristan)
     ./easyrsa init-pki >/dev/null 2>&1
     EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass >/dev/null 2>&1
+    
+    # Generate DH if needed (RSA mode)
+    if [[ $DH_TYPE == "2" ]]; then
+        openssl dhparam -out dh.pem $DH_KEY_SIZE >/dev/null 2>&1
+    fi
     
     # Generate server certificate and key
     EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-server-full "$SERVER_NAME" nopass >/dev/null 2>&1
@@ -469,88 +543,167 @@ EOF
     # Generate CRL (Certificate Revocation List)
     EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl >/dev/null 2>&1
     
-    # Generate tls-crypt key
-    openvpn --genkey secret tls-crypt.key
+    # Generate tls-crypt or tls-auth key (like angristan)
+    case $TLS_SIG in
+    1)
+        # Generate tls-crypt key
+        openvpn --genkey --secret /etc/openvpn/tls-crypt.key
+        ;;
+    2)
+        # Generate tls-auth key
+        openvpn --genkey --secret /etc/openvpn/tls-auth.key
+        ;;
+    esac
     
     # ===== COPY CERTIFICATES =====
     print_status "Installing certificates..."
     
-    # Copy certificates to OpenVPN directory
-    cp pki/ca.crt pki/private/ca.key "pki/issued/$SERVER_NAME.crt" "pki/private/$SERVER_NAME.key" pki/crl.pem tls-crypt.key /etc/openvpn/
+    # Copy certificates to OpenVPN directory (like angristan)
+    cp pki/ca.crt pki/private/ca.key "pki/issued/$SERVER_NAME.crt" "pki/private/$SERVER_NAME.key" /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn
+    if [[ $DH_TYPE == "2" ]]; then
+        cp dh.pem /etc/openvpn
+    fi
     
-    # Set proper permissions
+    # Set proper permissions (like angristan)
     chmod 644 /etc/openvpn/crl.pem
-    chmod 600 /etc/openvpn/tls-crypt.key
-    chmod 600 /etc/openvpn/pki/private/* 2>/dev/null || true
     
     # ===== CREATE SERVER CONFIGURATION =====
     print_status "Creating server configuration..."
     
-    cat > /etc/openvpn/server.conf << EOF
-# OpenVPN Server Configuration
-# Generated by VPN Panel Installer
-
-# Network settings
-port $OPENVPN_PORT
-proto $OPENVPN_PROTOCOL
-dev tun
-
-# Security settings
+    # Generate server.conf (exactly like angristan with our auto settings)
+    echo "port $PORT" > /etc/openvpn/server.conf
+    if [[ $IPV6_SUPPORT == 'n' ]]; then
+        echo "proto $PROTOCOL" >> /etc/openvpn/server.conf
+    elif [[ $IPV6_SUPPORT == 'y' ]]; then
+        echo "proto ${PROTOCOL}6" >> /etc/openvpn/server.conf
+    fi
+    
+    echo "dev tun
 user nobody
 group $NOGROUP
 persist-key
 persist-tun
-
-# Connection settings
 keepalive 10 120
 topology subnet
 server 10.8.0.0 255.255.255.0
-ifconfig-pool-persist ipp.txt
-
-# DNS and routing
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 1.1.1.1"
-push "dhcp-option DNS 1.0.0.1"
-
-# Modern encryption (ECDSA + AES-128-GCM)
-dh none
-ecdh-curve prime256v1
-tls-crypt tls-crypt.key
-crl-verify crl.pem
-
-# Certificates
+ifconfig-pool-persist ipp.txt" >> /etc/openvpn/server.conf
+    
+    # DNS resolvers (angristan style)
+    case $DNS in
+    1) # Current system resolvers
+        # Locate the proper resolv.conf
+        if grep -q "127.0.0.53" "/etc/resolv.conf"; then
+            RESOLVCONF='/run/systemd/resolve/resolv.conf'
+        else
+            RESOLVCONF='/etc/resolv.conf'
+        fi
+        # Obtain the resolvers from resolv.conf and use them for OpenVPN
+        sed -ne 's/^nameserver[[:space:]]\+\([^[:space:]]\+\).*$/\1/p' $RESOLVCONF | while read -r line; do
+            if [[ $line =~ ^[0-9.]*$ ]] || [[ $IPV6_SUPPORT == 'y' ]]; then
+                echo "push \"dhcp-option DNS $line\"" >> /etc/openvpn/server.conf
+            fi
+        done
+        ;;
+    3) # Cloudflare
+        echo 'push "dhcp-option DNS 1.0.0.1"' >> /etc/openvpn/server.conf
+        echo 'push "dhcp-option DNS 1.1.1.1"' >> /etc/openvpn/server.conf
+        ;;
+    4) # Quad9
+        echo 'push "dhcp-option DNS 9.9.9.9"' >> /etc/openvpn/server.conf
+        echo 'push "dhcp-option DNS 149.112.112.112"' >> /etc/openvpn/server.conf
+        ;;
+    9) # Google
+        echo 'push "dhcp-option DNS 8.8.8.8"' >> /etc/openvpn/server.conf
+        echo 'push "dhcp-option DNS 8.8.4.4"' >> /etc/openvpn/server.conf
+        ;;
+    11) # AdGuard DNS
+        echo 'push "dhcp-option DNS 94.140.14.14"' >> /etc/openvpn/server.conf
+        echo 'push "dhcp-option DNS 94.140.15.15"' >> /etc/openvpn/server.conf
+        ;;
+    esac
+    
+    echo 'push "redirect-gateway def1 bypass-dhcp"' >> /etc/openvpn/server.conf
+    
+    # IPv6 network settings if needed (like angristan)
+    if [[ $IPV6_SUPPORT == 'y' ]]; then
+        echo 'server-ipv6 fd42:42:42:42::/112
+tun-ipv6
+push tun-ipv6
+push "route-ipv6 2000::/3"
+push "redirect-gateway ipv6"' >> /etc/openvpn/server.conf
+    fi
+    
+    # Compression settings (angristan style)
+    if [[ $COMPRESSION_ENABLED == "y" ]]; then
+        echo "compress $COMPRESSION_ALG" >> /etc/openvpn/server.conf
+    fi
+    
+    # DH settings (angristan style)
+    if [[ $DH_TYPE == "1" ]]; then
+        echo "dh none" >> /etc/openvpn/server.conf
+        echo "ecdh-curve $DH_CURVE" >> /etc/openvpn/server.conf
+    elif [[ $DH_TYPE == "2" ]]; then
+        echo "dh dh.pem" >> /etc/openvpn/server.conf
+    fi
+    
+    # TLS settings (angristan style)
+    case $TLS_SIG in
+    1)
+        echo "tls-crypt tls-crypt.key" >> /etc/openvpn/server.conf
+        ;;
+    2)
+        echo "tls-auth tls-auth.key 0" >> /etc/openvpn/server.conf
+        ;;
+    esac
+    
+    # Final server configuration (angristan style)
+    echo "crl-verify crl.pem
 ca ca.crt
 cert $SERVER_NAME.crt
 key $SERVER_NAME.key
-
-# Cipher settings
-auth SHA256
-cipher AES-128-GCM
-ncp-ciphers AES-128-GCM
+auth $HMAC_ALG
+cipher $CIPHER
+ncp-ciphers $CIPHER
 tls-server
 tls-version-min 1.2
-tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
-
-# Management
+tls-cipher $CC_CIPHER
 client-config-dir /etc/openvpn/ccd
 status /var/log/openvpn/status.log
-verb 3
-
-# Add explicit-exit-notify only for UDP
-$(if [[ "$OPENVPN_PROTOCOL" == "udp" ]]; then echo "explicit-exit-notify 1"; fi)
-EOF
+verb 3" >> /etc/openvpn/server.conf
     
     # ===== CREATE DIRECTORIES =====
     mkdir -p /etc/openvpn/ccd
     mkdir -p /var/log/openvpn
     
+    # Enable IP forwarding (like angristan)
+    echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
+    if [[ $IPV6_SUPPORT == 'y' ]]; then
+        echo 'net.ipv6.conf.all.forwarding=1' >> /etc/sysctl.d/99-openvpn.conf
+    fi
+    # Apply sysctl rules
+    sysctl --system >/dev/null 2>&1
+    
+    # SELinux configuration (like angristan)
+    if hash sestatus 2>/dev/null; then
+        if sestatus | grep "Current mode" | grep -qs "enforcing"; then
+            if [[ $PORT != '1194' ]]; then
+                semanage port -a -t openvpn_port_t -p "$PROTOCOL" "$PORT" >/dev/null 2>&1
+            fi
+        fi
+    fi
+    
     # ===== CREATE CLIENT TEMPLATE =====
     print_status "Creating client template..."
     
-    cat > /etc/openvpn/client-template.txt << EOF
-client
-remote ${PUBLIC_IP:-localhost} $OPENVPN_PORT
-proto $OPENVPN_PROTOCOL
+    # client-template.txt (exactly like angristan)
+    echo "client" > /etc/openvpn/client-template.txt
+    if [[ $PROTOCOL == 'udp' ]]; then
+        echo "proto udp" >> /etc/openvpn/client-template.txt
+        echo "explicit-exit-notify" >> /etc/openvpn/client-template.txt
+    elif [[ $PROTOCOL == 'tcp' ]]; then
+        echo "proto tcp-client" >> /etc/openvpn/client-template.txt
+    fi
+    echo "remote $PUBLIC_IP $PORT
 dev tun
 resolv-retry infinite
 nobind
@@ -558,19 +711,19 @@ persist-key
 persist-tun
 remote-cert-tls server
 verify-x509-name $SERVER_NAME name
-auth SHA256
+auth $HMAC_ALG
 auth-nocache
-cipher AES-128-GCM
+cipher $CIPHER
 tls-client
 tls-version-min 1.2
-tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
+tls-cipher $CC_CIPHER
 ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns
-verb 3
-
-# Add explicit-exit-notify only for UDP
-$(if [[ "$OPENVPN_PROTOCOL" == "udp" ]]; then echo "explicit-exit-notify"; fi)
-EOF
+verb 3" >> /etc/openvpn/client-template.txt
+    
+    if [[ $COMPRESSION_ENABLED == "y" ]]; then
+        echo "compress $COMPRESSION_ALG" >> /etc/openvpn/client-template.txt
+    fi
     
     # ===== SETUP IPTABLES RULES =====
     print_status "Configuring firewall rules..."
@@ -578,27 +731,37 @@ EOF
     # Create iptables rules directory
     mkdir -p /etc/iptables
     
-    # Script to add OpenVPN rules
-    cat > /etc/iptables/add-openvpn-rules.sh << EOF
-#!/bin/bash
-# Add OpenVPN iptables rules
+    # Script to add rules (exactly like angristan)
+    echo "#!/bin/sh
 iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -I INPUT 1 -i tun0 -j ACCEPT
 iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
 iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
-iptables -I INPUT 1 -i $NIC -p $OPENVPN_PROTOCOL --dport $OPENVPN_PORT -j ACCEPT
-EOF
+iptables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" > /etc/iptables/add-openvpn-rules.sh
     
-    # Script to remove OpenVPN rules
-    cat > /etc/iptables/rm-openvpn-rules.sh << EOF
-#!/bin/bash
-# Remove OpenVPN iptables rules
-iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE 2>/dev/null || true
-iptables -D INPUT -i tun0 -j ACCEPT 2>/dev/null || true
-iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT 2>/dev/null || true
-iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT 2>/dev/null || true
-iptables -D INPUT -i $NIC -p $OPENVPN_PROTOCOL --dport $OPENVPN_PORT -j ACCEPT 2>/dev/null || true
-EOF
+    if [[ $IPV6_SUPPORT == 'y' ]]; then
+        echo "ip6tables -t nat -I POSTROUTING 1 -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
+ip6tables -I INPUT 1 -i tun0 -j ACCEPT
+ip6tables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
+ip6tables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
+ip6tables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >> /etc/iptables/add-openvpn-rules.sh
+    fi
+    
+    # Script to remove rules (exactly like angristan)
+    echo "#!/bin/sh
+iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+iptables -D INPUT -i tun0 -j ACCEPT
+iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT
+iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT
+iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" > /etc/iptables/rm-openvpn-rules.sh
+    
+    if [[ $IPV6_SUPPORT == 'y' ]]; then
+        echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
+ip6tables -D INPUT -i tun0 -j ACCEPT
+ip6tables -D FORWARD -i $NIC -o tun0 -j ACCEPT
+ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT
+ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >> /etc/iptables/rm-openvpn-rules.sh
+    fi
     
     chmod +x /etc/iptables/add-openvpn-rules.sh
     chmod +x /etc/iptables/rm-openvpn-rules.sh
@@ -630,19 +793,40 @@ EOF
     # Apply only OpenVPN specific settings silently
     sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
     
-    # ===== START SERVICES =====
-    print_status "Starting OpenVPN services..."
-    
-    # Reload systemd and start services silently
-    systemctl daemon-reload >/dev/null 2>&1
-    
-    # Enable and start iptables rules silently
+    # Enable service and apply rules (like angristan)
+    systemctl daemon-reload
     systemctl enable iptables-openvpn >/dev/null 2>&1
     systemctl start iptables-openvpn >/dev/null 2>&1
     
-    # Enable and start OpenVPN silently
-    systemctl enable openvpn@server >/dev/null 2>&1
-    systemctl start openvpn@server >/dev/null 2>&1
+    # ===== START OPENVPN SERVICE =====
+    print_status "Starting OpenVPN services..."
+    
+    # Finally, restart and enable OpenVPN (exactly like angristan)
+    if [[ $OS == 'arch' || $OS == 'fedora' || $OS == 'centos' || $OS == 'oracle' ]]; then
+        # Don't modify package-provided service
+        cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service >/dev/null 2>&1
+        
+        # Workaround to fix OpenVPN service on OpenVZ
+        sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
+        # Another workaround to keep using /etc/openvpn/
+        sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
+        
+        systemctl daemon-reload
+        systemctl enable openvpn-server@server >/dev/null 2>&1
+        systemctl restart openvpn-server@server >/dev/null 2>&1
+    else
+        # Don't modify package-provided service
+        cp /lib/systemd/system/openvpn\@.service /etc/systemd/system/openvpn\@.service >/dev/null 2>&1
+        
+        # Workaround to fix OpenVPN service on OpenVZ
+        sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn\@.service 2>/dev/null
+        # Another workaround to keep using /etc/openvpn/
+        sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service 2>/dev/null
+        
+        systemctl daemon-reload
+        systemctl enable openvpn@server >/dev/null 2>&1
+        systemctl restart openvpn@server >/dev/null 2>&1
+    fi
     
     # Wait a moment for service to start
     sleep 3
