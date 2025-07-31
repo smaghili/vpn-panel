@@ -87,10 +87,10 @@ check_existing_installation() {
             # Remove Redis data
             rm -rf /var/lib/redis
             
-            # Clean firewall rules
-            ufw delete allow 8000 2>/dev/null || true
-            ufw delete allow 1194 2>/dev/null || true
-            ufw delete allow 51820 2>/dev/null || true
+            # Clean firewall rules silently
+            ufw --force delete allow 8000 >/dev/null 2>&1 || true
+            ufw --force delete allow 1194 >/dev/null 2>&1 || true
+            ufw --force delete allow 51820 >/dev/null 2>&1 || true
             
             systemctl daemon-reload
             print_success "Previous installation removed"
