@@ -20,21 +20,24 @@ def create_admin_user(username, password):
     try:
         # Try to import VPN Panel modules
         from src.infrastructure.database.unified_user_repository import UnifiedUserRepository
-        from src.domain.services.auth_service import AuthService
         from src.domain.entities.user_profile import UserProfile, ProtocolType
         
         print("Using VPN Panel modules...")
         
-        # Initialize repository and auth service
+        # Initialize repository
         repo = UnifiedUserRepository('/var/lib/vpn-panel/users.db')
-        auth_service = AuthService()
+        
+        # Hash password using bcrypt directly
+        import bcrypt
+        salt = bcrypt.gensalt()
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
         
         # Create admin user profile
         admin_user = UserProfile(
             user_id=str(uuid.uuid4()),
             username=username,
             email='admin@vpn-panel.local',
-            password_hash=auth_service.hash_password(password),
+            password_hash=password_hash,
             role='admin',
             status='active'
         )
