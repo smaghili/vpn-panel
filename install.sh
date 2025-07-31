@@ -506,7 +506,9 @@ tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
 client-config-dir /etc/openvpn/ccd
 status /var/log/openvpn/status.log
 verb 3
-explicit-exit-notify 1
+
+# Add explicit-exit-notify only for UDP
+$(if [[ "$OPENVPN_PROTOCOL" == "udp" ]]; then echo "explicit-exit-notify 1"; fi)
 EOF
     
     # ===== CREATE DIRECTORIES =====
@@ -536,7 +538,9 @@ tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
 ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns
 verb 3
-explicit-exit-notify
+
+# Add explicit-exit-notify only for UDP
+$(if [[ "$OPENVPN_PROTOCOL" == "udp" ]]; then echo "explicit-exit-notify"; fi)
 EOF
     
     # ===== SETUP IPTABLES RULES =====
