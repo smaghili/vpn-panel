@@ -364,20 +364,49 @@ EOF
 setup_openvpn() {
     print_status "Setting up OpenVPN with professional configuration..."
     
-    # ===== CLEANUP EXISTING INSTALLATION =====
+    # ===== COMPLETE CLEANUP OF EXISTING INSTALLATION =====
     print_status "Cleaning up any existing OpenVPN installation..."
     
-    # Stop existing OpenVPN services
+    # Stop and disable ALL OpenVPN services
+    systemctl stop openvpn 2>/dev/null || true
     systemctl stop openvpn@server 2>/dev/null || true
+    systemctl stop openvpn@client 2>/dev/null || true
     systemctl stop openvpn-server@server 2>/dev/null || true
+    systemctl stop openvpn-client@client 2>/dev/null || true
+    systemctl disable openvpn 2>/dev/null || true
     systemctl disable openvpn@server 2>/dev/null || true
+    systemctl disable openvpn@client 2>/dev/null || true
     systemctl disable openvpn-server@server 2>/dev/null || true
+    systemctl disable openvpn-client@client 2>/dev/null || true
     
-    # Remove existing OpenVPN configuration and files
-    rm -rf /etc/openvpn/*
-    rm -rf /var/log/openvpn
-    rm -f /etc/systemd/system/openvpn@.service
-    rm -f /etc/systemd/system/openvpn-server@.service
+    # Kill any running OpenVPN processes
+    pkill -f openvpn 2>/dev/null || true
+    sleep 2
+    pkill -9 -f openvpn 2>/dev/null || true
+    
+    # Remove ALL OpenVPN configuration and files
+    rm -rf /etc/openvpn/
+    rm -rf /var/log/openvpn/
+    rm -rf /usr/share/doc/openvpn/
+    rm -rf /etc/default/openvpn
+    rm -f /etc/systemd/system/openvpn*.service
+    rm -f /etc/systemd/system/multi-user.target.wants/openvpn*
+    rm -f /lib/systemd/system/openvpn*.service
+    
+    # Remove any OpenVPN network interfaces
+    ip link delete tun0 2>/dev/null || true
+    ip link delete tun1 2>/dev/null || true
+    
+    # Clean iptables rules (remove old OpenVPN rules)
+    iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -j MASQUERADE 2>/dev/null || true
+    iptables -D INPUT -i tun0 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -i tun0 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -o tun0 -j ACCEPT 2>/dev/null || true
+    iptables -D INPUT -p udp --dport 1194 -j ACCEPT 2>/dev/null || true
+    iptables -D INPUT -p tcp --dport 1194 -j ACCEPT 2>/dev/null || true
+    
+    # Reload systemd
+    systemctl daemon-reload
     
     # ===== DETECT SYSTEM CONFIGURATION =====
     # Find out if the machine uses nogroup or nobody for the permissionless group
