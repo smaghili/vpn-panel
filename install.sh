@@ -373,7 +373,7 @@ EOF
     
     # Initialize PKI and create CA
     ./easyrsa init-pki >/dev/null 2>&1
-    EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch build-ca nopass >/dev/null 2>&1
+    EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass >/dev/null 2>&1
     
     # Generate server certificate and key
     EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-server-full "$SERVER_NAME" nopass >/dev/null 2>&1
