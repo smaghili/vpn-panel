@@ -18,11 +18,8 @@ from pathlib import Path
 # Setup logging
 logger = logging.getLogger(__name__)
 
-from ...infrastructure.database.sqlite_repository import (
-    SQLiteUserRepository, 
-    SQLiteServerRepository, 
-    SQLiteClientRepository
-)
+from ...infrastructure.database.admin_repository import AdminRepository
+from ...infrastructure.database.vpn_user_repository import VPNUserRepository
 from ...domain.services.auth_service import AuthService
 from ...domain.services.vpn_service import VPNService
 from ...application.use_cases.user_use_cases import (
@@ -151,22 +148,26 @@ SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Database
+# Database - New Structure
 db_path = os.getenv("DB_PATH", "/var/lib/vpn-panel/vpn_panel.db")
-user_repository = SQLiteUserRepository(db_path)
-server_repository = SQLiteServerRepository(db_path)
-client_repository = SQLiteClientRepository(db_path)
+admin_repository = AdminRepository(db_path)
+vpn_user_repository = VPNUserRepository(db_path)
 
-# Services
-auth_service = AuthService(user_repository, SECRET_KEY)
-vpn_service = VPNService(server_repository, client_repository)
+# Services - Updated for new structure
+# Note: These services need to be updated to work with new repositories
+# For now, keeping basic functionality
+class SimpleAuthService:
+    def __init__(self, admin_repo):
+        self.admin_repo = admin_repo
+        self.secret_key = SECRET_KEY
+    
+    def authenticate_admin(self, username, password):
+        return self.admin_repo.authenticate_admin(username, password)
 
-# Use cases
-create_user_use_case = CreateUserUseCase(user_repository)
-update_user_use_case = UpdateUserUseCase(user_repository)
-delete_user_use_case = DeleteUserUseCase(user_repository)
-get_user_use_case = GetUserUseCase(user_repository)
-list_users_use_case = ListUsersUseCase(user_repository)
+auth_service = SimpleAuthService(admin_repository)
+
+# Use cases - Simplified for new structure
+# These will need to be updated to work with new repositories
 
 # Security components
 csrf_protection = CSRFProtection()

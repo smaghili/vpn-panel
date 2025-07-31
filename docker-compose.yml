@@ -10,7 +10,7 @@ services:
     environment:
       - PORT=8080
       - REDIS_URL=redis://redis:6379
-      - DB_PATH=/var/lib/vpn-panel/users.db
+      - DB_PATH=/var/lib/vpn-panel/vpn_panel.db
     volumes:
       - vpn_panel_data:/var/lib/vpn-panel
       - vpn_panel_config:/etc/vpn-panel

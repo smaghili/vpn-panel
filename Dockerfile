@@ -68,15 +68,9 @@ until redis-cli ping; do
 done
 
 # Initialize database if needed
-if [ ! -f /var/lib/vpn-panel/users.db ]; then
+if [ ! -f /var/lib/vpn-panel/vpn_panel.db ]; then
     echo "Initializing database..."
-    python -c "
-import sys
-sys.path.insert(0, '/var/lib/vpn-panel/src')
-from src.infrastructure.database.unified_user_repository import UnifiedUserRepository
-repo = UnifiedUserRepository('/var/lib/vpn-panel/users.db')
-print('Database initialized')
-"
+    python /var/lib/vpn-panel/scripts/create_proper_database.py admin admin123
 fi
 
 # Start VPN Panel

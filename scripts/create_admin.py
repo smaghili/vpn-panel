@@ -4,7 +4,7 @@ Admin User Creation Script for VPN Panel
 ========================================
 
 This script creates the initial admin user for the VPN Panel.
-It supports both full VPN Panel modules and fallback SQLite method.
+Uses the new proper database structure with separate admin and user tables.
 """
 import sys
 import os
@@ -16,62 +16,53 @@ import uuid
 sys.path.insert(0, '/var/lib/vpn-panel/src')
 
 def create_admin_user(username, password):
-    """Create admin user with fallback method"""
+    """Create admin user using new repository structure"""
     try:
-        # Try to import VPN Panel modules
-        from src.infrastructure.database.unified_user_repository import UnifiedUserRepository
-        from src.domain.entities.user_profile import UserProfile, ProtocolType
+        # Try to import new VPN Panel modules
+        from src.infrastructure.database.admin_repository import AdminRepository
         
-        print("Using VPN Panel modules...")
+        print("Using VPN Panel Admin Repository...")
         
-        # Initialize repository
-        repo = UnifiedUserRepository('/var/lib/vpn-panel/users.db')
+        # Initialize admin repository
+        db_path = '/var/lib/vpn-panel/vpn_panel.db'
+        admin_repo = AdminRepository(db_path)
         
-        # Hash password using bcrypt directly
-        import bcrypt
-        salt = bcrypt.gensalt()
-        password_hash = bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+        # Create admin user
+        admin_id = admin_repo.create_admin(username, password, role='admin')
         
-        # Create admin user profile
-        admin_user = UserProfile(
-            user_id=str(uuid.uuid4()),
-            username=username,
-            email='admin@vpn-panel.local',
-            password_hash=password_hash,
-            role='admin',
-            status='active'
-        )
-        
-        # Save admin user
-        if repo.save_user(admin_user):
+        if admin_id:
             print("✅ Admin user created successfully!")
             print(f"   Username: {username}")
+            print(f"   ID: {admin_id}")
             return True
         else:
-            print("❌ Failed to create admin user with VPN Panel modules")
+            print("❌ Failed to create admin user (username might already exist)")
             return False
     
     except ImportError as e:
         print(f"⚠️  VPN Panel modules not found: {e}")
-        print("Using fallback SQLite method...")
+        print("Using fallback method...")
         
-        # Fallback: Create admin user directly with SQLite
-        db_path = '/var/lib/vpn-panel/users.db'
+        # Fallback: Create database and admin directly
+        db_path = '/var/lib/vpn-panel/vpn_panel.db'
         
         try:
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             
-            # Create users table if not exists
+            # Create admins table with proper schema
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
+                CREATE TABLE IF NOT EXISTS admins (
                     id TEXT PRIMARY KEY,
                     username TEXT UNIQUE NOT NULL,
-                    email TEXT,
                     password_hash TEXT NOT NULL,
-                    role TEXT DEFAULT 'user',
-                    status TEXT DEFAULT 'active',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'representative')),
+                    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'suspended')),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_login TEXT,
+                    created_by TEXT,
+                    FOREIGN KEY (created_by) REFERENCES admins(id)
                 )
             ''')
             
@@ -79,21 +70,29 @@ def create_admin_user(username, password):
             password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             
             # Insert admin user
+            from datetime import datetime
+            current_time = datetime.now().isoformat()
+            
             cursor.execute('''
-                INSERT INTO users (id, username, email, password_hash, role, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO admins (
+                    id, username, password_hash, role, status,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 str(uuid.uuid4()),
                 username,
-                'admin@vpn-panel.local',
                 password_hash,
                 'admin',
-                'active'
+                'active',
+                current_time,
+                current_time
             ))
             conn.commit()
             
             print("✅ Admin user created successfully with fallback method!")
             print(f"   Username: {username}")
+            print("   Database: /var/lib/vpn-panel/vpn_panel.db")
             return True
             
         except sqlite3.IntegrityError:

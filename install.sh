@@ -63,95 +63,179 @@ validate_password() {
     return 0
 }
 
-# Function to get user input
+# Function to check existing installation
+check_existing_installation() {
+    if [ -d "/var/lib/vpn-panel" ] || [ -f "/etc/systemd/system/vpn-panel.service" ] || systemctl is-active --quiet redis-server 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  VPN Panel is already installed!${NC}"
+        echo ""
+        echo "Would you like to completely remove all settings and reinstall?"
+        echo "This will delete:"
+        echo "  • All VPN users and configurations"
+        echo "  • Database and settings"  
+        echo "  • Redis cache"
+        echo "  • All certificates and keys"
+        echo ""
+        read -p "Remove everything and reinstall? [Y/n]: " REINSTALL
+        REINSTALL=${REINSTALL:-Y}
+        
+        if [[ $REINSTALL =~ ^[Yy]$ ]]; then
+            print_status "Removing existing installation..."
+            
+            # Stop services
+            systemctl stop vpn-panel 2>/dev/null || true
+            systemctl stop redis-server 2>/dev/null || true
+            systemctl disable vpn-panel 2>/dev/null || true
+            
+            # Remove directories
+            rm -rf /var/lib/vpn-panel
+            rm -rf /etc/vpn-panel
+            rm -rf /var/log/vpn-panel
+            rm -f /etc/systemd/system/vpn-panel.service
+            
+            # Remove Redis data
+            rm -rf /var/lib/redis
+            
+            # Clean firewall rules
+            ufw delete allow 8000 2>/dev/null || true
+            ufw delete allow 1194 2>/dev/null || true
+            ufw delete allow 51820 2>/dev/null || true
+            
+            systemctl daemon-reload
+            print_success "Previous installation removed"
+            echo ""
+        else
+            print_error "Installation cancelled"
+            exit 0
+        fi
+    fi
+}
+
+# Function to get user input with auto mode
 get_user_input() {
     echo -e "${BLUE}=== VPN Panel Installation ===${NC}"
     echo ""
-    
-    # Get port
-    while true; do
-        read -p "Enter port for VPN Panel (default: 8000): " PORT
-        PORT=${PORT:-8000}
-        if [[ $PORT =~ ^[0-9]+$ ]] && [ $PORT -ge 1024 ] && [ $PORT -le 65535 ]; then
-            break
-        else
-            print_error "Port must be a number between 1024 and 65535"
-        fi
-    done
-    
-    # Get admin username
-    while true; do
-        read -p "Enter admin username (default: admin): " ADMIN_USERNAME
-        ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-        if [[ $ADMIN_USERNAME =~ ^[a-zA-Z0-9_]+$ ]] && [ ${#ADMIN_USERNAME} -ge 3 ]; then
-            break
-        else
-            print_error "Username must be at least 3 characters and contain only letters, numbers, and underscores"
-        fi
-    done
-    
-    # ===== ADMIN PASSWORD INPUT =====
-    # Get admin password with enhanced UX
+    echo "🚀 Quick Setup Available!"
     echo ""
-    echo "Enter admin password (leave empty for auto-generation):"
-    echo "  • Minimum 8 characters required"
-    echo "  • Press ENTER without typing for random password"
+    echo "Choose installation mode:"
+    echo "  Y - Auto mode (recommended): Use secure defaults"
+    echo "  N - Manual mode: Configure everything yourself"
     echo ""
-    read -p "Admin password: " ADMIN_PASSWORD
+    read -p "Use auto mode? [Y/n]: " AUTO_MODE
+    AUTO_MODE=${AUTO_MODE:-Y}
     
-    # Generate random password if empty
-    if [ -z "$ADMIN_PASSWORD" ]; then
-        ADMIN_PASSWORD=$(generate_random_password 12)
-        ADMIN_PASSWORD_GENERATED=true
-        print_status "Random password generated successfully"
+    if [[ $AUTO_MODE =~ ^[Yy]$ ]]; then
+        # AUTO MODE - Generate everything
+        print_status "Using auto mode - generating secure defaults..."
+        
+        ADMIN_USERNAME="admin"
+        ADMIN_PASSWORD=$(generate_random_password 16)
+        PORT="8000"
+        OPENVPN_PORT="1194"
+        OPENVPN_PROTOCOL="tcp"
+        WIREGUARD_PORT="51820"
+        
+        echo ""
+        print_success "Auto-generated configuration:"
+        echo "  👤 Admin Username: $ADMIN_USERNAME"
+        echo "  🔑 Admin Password: $ADMIN_PASSWORD"
+        echo "  🌐 Panel Port: $PORT"
+        echo "  🔒 OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
+        echo "  🔒 WireGuard Port: $WIREGUARD_PORT (udp)"
+        echo ""
+        echo "⚠️  IMPORTANT: Save these credentials!"
+        echo ""
+        read -p "Press ENTER to continue with these settings..."
+        
     else
-        # Validate manual password
-        if [ ${#ADMIN_PASSWORD} -lt 8 ]; then
-            print_error "Password must be at least 8 characters"
-            exit 1
-        fi
-        ADMIN_PASSWORD_GENERATED=false
-        print_status "Manual password accepted"
-    fi
-    
-    # Get OpenVPN port
-    while true; do
-        read -p "Enter OpenVPN port (default: 1194): " OPENVPN_PORT
-        OPENVPN_PORT=${OPENVPN_PORT:-1194}
-        if [[ $OPENVPN_PORT =~ ^[0-9]+$ ]] && [ $OPENVPN_PORT -ge 1 ] && [ $OPENVPN_PORT -le 65535 ]; then
-            break
+        # MANUAL MODE - Ask user for everything
+        print_status "Using manual mode - please configure settings..."
+        echo ""
+        
+        # Get admin username
+        while true; do
+            read -p "Admin username [admin]: " ADMIN_USERNAME
+            ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+            if [[ $ADMIN_USERNAME =~ ^[a-zA-Z0-9_]+$ ]] && [ ${#ADMIN_USERNAME} -ge 3 ]; then
+                break
+            else
+                print_error "Username must be at least 3 characters (letters, numbers, underscore only)"
+            fi
+        done
+        
+        # Get admin password
+        while true; do
+            echo ""
+            echo "Admin password (leave empty for auto-generation):"
+            read -p "Password: " ADMIN_PASSWORD
+            
+            if [ -z "$ADMIN_PASSWORD" ]; then
+                ADMIN_PASSWORD=$(generate_random_password 16)
+                print_success "Generated password: $ADMIN_PASSWORD"
+                break
+            elif validate_password "$ADMIN_PASSWORD"; then
+                break
+            else
+                print_error "Password must be at least 8 characters"
+            fi
+        done
+        
+        # Get panel port
+        while true; do
+            read -p "VPN Panel port [8000]: " PORT
+            PORT=${PORT:-8000}
+            if [[ $PORT =~ ^[0-9]+$ ]] && [ $PORT -ge 1024 ] && [ $PORT -le 65535 ]; then
+                break
+            else
+                print_error "Port must be between 1024-65535"
+            fi
+        done
+        
+        # Get OpenVPN port
+        while true; do
+            read -p "OpenVPN port [1194]: " OPENVPN_PORT
+            OPENVPN_PORT=${OPENVPN_PORT:-1194}
+            if [[ $OPENVPN_PORT =~ ^[0-9]+$ ]] && [ $OPENVPN_PORT -ge 1024 ] && [ $OPENVPN_PORT -le 65535 ]; then
+                break
+            else
+                print_error "Port must be between 1024-65535"
+            fi
+        done
+        
+        # Get OpenVPN protocol
+        echo ""
+        echo "OpenVPN Protocol:"
+        echo "  1) TCP (recommended - reliable)"
+        echo "  2) UDP (faster but less reliable)"
+        read -p "Choose protocol [1]: " PROTO_CHOICE
+        PROTO_CHOICE=${PROTO_CHOICE:-1}
+        
+        if [ "$PROTO_CHOICE" = "2" ]; then
+            OPENVPN_PROTOCOL="udp"
         else
-            print_error "Port must be a number between 1 and 65535"
+            OPENVPN_PROTOCOL="tcp"
         fi
-    done
-    
-    # Get OpenVPN protocol
-    while true; do
-        echo "Select OpenVPN protocol:"
-        echo "  1) UDP (faster, recommended)"
-        echo "  2) TCP (more reliable)"
-        read -p "Protocol choice [1-2]: " PROTOCOL_CHOICE
-        case $PROTOCOL_CHOICE in
-            1)
-                OPENVPN_PROTOCOL="udp"
+        
+        # Get WireGuard port
+        while true; do
+            read -p "WireGuard port [51820]: " WIREGUARD_PORT
+            WIREGUARD_PORT=${WIREGUARD_PORT:-51820}
+            if [[ $WIREGUARD_PORT =~ ^[0-9]+$ ]] && [ $WIREGUARD_PORT -ge 1024 ] && [ $WIREGUARD_PORT -le 65535 ]; then
                 break
-                ;;
-            2)
-                OPENVPN_PROTOCOL="tcp"
-                break
-                ;;
-            *)
-                print_error "Please select 1 or 2"
-                ;;
-        esac
-    done
+            else
+                print_error "Port must be between 1024-65535"
+            fi
+        done
+        
+        echo ""
+        print_success "Configuration complete!"
+    fi
     
     echo ""
     print_status "Installation will proceed with:"
-    echo "  Panel Port: $PORT"
-    echo "  Admin Username: $ADMIN_USERNAME"
-    echo "  OpenVPN Port: $OPENVPN_PORT"
-    echo "  OpenVPN Protocol: $OPENVPN_PROTOCOL"
+    echo "  👤 Admin Username: $ADMIN_USERNAME"
+    echo "  🌐 Panel Port: $PORT"
+    echo "  🔒 OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
+    echo "  🔒 WireGuard Port: $WIREGUARD_PORT (udp)"
     echo ""
     print_status "Starting installation..."
 }
@@ -908,19 +992,14 @@ display_final_info() {
     echo "📋 SYSTEM INFORMATION:"
     echo "   • Panel URL: http://$(curl -s ifconfig.me):$PORT"
     echo "   • Panel Port: $PORT"
-    echo "   • WireGuard Port: 51820"
+    echo "   • WireGuard Port: $WIREGUARD_PORT (udp)"
     echo "   • OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)"
     echo ""
     echo "🔐 ADMIN CREDENTIALS:"
     echo "   • Username: $ADMIN_USERNAME"
-    if [ "$ADMIN_PASSWORD_GENERATED" = true ]; then
-        echo "   • Password: $ADMIN_PASSWORD (AUTO-GENERATED)"
-        echo ""
-        echo "⚠️  IMPORTANT: Save these credentials securely!"
-        echo "   The auto-generated password will not be shown again."
-    else
-        echo "   • Password: [Your manual password]"
-    fi
+    echo "   • Password: $ADMIN_PASSWORD"
+    echo ""
+    echo "⚠️  IMPORTANT: Save these credentials securely!"
     echo ""
     echo "🚀 NEXT STEPS:"
     echo "   1. Open browser and go to: http://$(curl -s ifconfig.me):$PORT"
@@ -954,7 +1033,7 @@ Panel URL: http://$(curl -s ifconfig.me):$PORT
 Admin Username: $ADMIN_USERNAME
 Admin Password: $ADMIN_PASSWORD
 Panel Port: $PORT
-WireGuard Port: 51820
+WireGuard Port: $WIREGUARD_PORT (udp)
 OpenVPN Port: $OPENVPN_PORT ($OPENVPN_PROTOCOL)
 
 Installation Date: $(date)
@@ -976,6 +1055,9 @@ main() {
     
     # Check if running as root
     check_root
+    
+    # Check existing installation
+    check_existing_installation
     
     # Get user input
     get_user_input
