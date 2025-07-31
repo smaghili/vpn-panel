@@ -421,6 +421,13 @@ setup_openvpn() {
     rm -f /etc/systemd/system/multi-user.target.wants/openvpn*
     rm -f /lib/systemd/system/openvpn*.service
     
+    # Remove any cached OpenVPN configs
+    rm -f /tmp/openvpn* /tmp/easy-rsa* 2>/dev/null || true
+    rm -rf /var/cache/openvpn/ 2>/dev/null || true
+    
+    # Create fresh OpenVPN directory
+    mkdir -p /etc/openvpn
+    
     # Remove any OpenVPN network interfaces
     ip link delete tun0 2>/dev/null || true
     ip link delete tun1 2>/dev/null || true
@@ -671,6 +678,9 @@ client-config-dir /etc/openvpn/ccd
 status /var/log/openvpn/status.log
 verb 3" >> /etc/openvpn/server.conf
     
+    # IMPORTANT: Make sure explicit-exit-notify is NEVER in server.conf (it's client-only)
+    sed -i '/explicit-exit-notify/d' /etc/openvpn/server.conf
+    
     # ===== CREATE DIRECTORIES =====
     mkdir -p /etc/openvpn/ccd
     mkdir -p /var/log/openvpn
@@ -804,27 +814,44 @@ EOF
     # Finally, restart and enable OpenVPN (exactly like angristan)
     if [[ $OS == 'arch' || $OS == 'fedora' || $OS == 'centos' || $OS == 'oracle' ]]; then
         # Don't modify package-provided service
-        cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service >/dev/null 2>&1
-        
-        # Workaround to fix OpenVPN service on OpenVZ
-        sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
-        # Another workaround to keep using /etc/openvpn/
-        sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
-        
-        systemctl daemon-reload
-        systemctl enable openvpn-server@server >/dev/null 2>&1
-        systemctl restart openvpn-server@server >/dev/null 2>&1
+        if [[ -f /usr/lib/systemd/system/openvpn-server@.service ]]; then
+            cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service >/dev/null 2>&1
+            
+            # Workaround to fix OpenVPN service on OpenVZ
+            sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
+            # Another workaround to keep using /etc/openvpn/
+            sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service 2>/dev/null
+            
+            systemctl daemon-reload
+            systemctl enable openvpn-server@server >/dev/null 2>&1
+            systemctl restart openvpn-server@server >/dev/null 2>&1
+        else
+            # Fallback to regular openvpn service
+            systemctl enable openvpn@server >/dev/null 2>&1 
+            systemctl restart openvpn@server >/dev/null 2>&1
+        fi
     else
-        # Don't modify package-provided service
-        cp /lib/systemd/system/openvpn\@.service /etc/systemd/system/openvpn\@.service >/dev/null 2>&1
-        
-        # Workaround to fix OpenVPN service on OpenVZ
-        sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn\@.service 2>/dev/null
-        # Another workaround to keep using /etc/openvpn/
-        sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service 2>/dev/null
+        # Don't modify package-provided service  
+        if [[ -f /lib/systemd/system/openvpn@.service ]]; then
+            cp /lib/systemd/system/openvpn@.service /etc/systemd/system/openvpn@.service >/dev/null 2>&1
+            
+            # Workaround to fix OpenVPN service on OpenVZ
+            sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn@.service 2>/dev/null
+            # Another workaround to keep using /etc/openvpn/
+            sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn@.service 2>/dev/null
+        fi
         
         systemctl daemon-reload
         systemctl enable openvpn@server >/dev/null 2>&1
+        systemctl restart openvpn@server >/dev/null 2>&1
+    fi
+    
+    # Additional debug: Verify server config
+    if ! grep -q "explicit-exit-notify" /etc/openvpn/server.conf; then
+        print_status "Server configuration verified - no explicit-exit-notify found"
+    else
+        print_warning "Found explicit-exit-notify in server.conf - this should not happen!"
+        sed -i '/explicit-exit-notify/d' /etc/openvpn/server.conf
         systemctl restart openvpn@server >/dev/null 2>&1
     fi
     
