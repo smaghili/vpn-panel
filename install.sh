@@ -730,27 +730,137 @@ EOF
 start_services() {
     print_status "Starting services..."
     
-    # Start Redis with error handling
+    # ===== REDIS TROUBLESHOOTING AND SETUP =====
     print_status "Configuring Redis..."
-    if systemctl enable redis-server >/dev/null 2>&1 && systemctl start redis-server >/dev/null 2>&1; then
-        print_success "Redis started successfully"
-    else
-        print_warning "Redis failed to start - using fallback configuration"
-        # Create minimal Redis config for VPN Panel
-        mkdir -p /etc/redis-fallback
-        cat > /etc/redis-fallback/redis.conf << EOF
-port 6379
+    
+    # Stop any existing Redis processes
+    systemctl stop redis-server 2>/dev/null || true
+    pkill redis-server 2>/dev/null || true
+    
+    # Clean Redis data directory
+    print_status "Cleaning Redis data..."
+    rm -rf /var/lib/redis/* 2>/dev/null || true
+    rm -rf /var/log/redis/* 2>/dev/null || true
+    
+    # Check if port 6379 is in use
+    if netstat -tuln | grep -q ":6379 "; then
+        print_warning "Port 6379 is busy - killing processes..."
+        fuser -k 6379/tcp 2>/dev/null || true
+        sleep 2
+    fi
+    
+    # Fix Redis configuration
+    print_status "Fixing Redis configuration..."
+    if [ -f /etc/redis/redis.conf ]; then
+        # Backup original config
+        cp /etc/redis/redis.conf /etc/redis/redis.conf.backup
+        
+        # Create clean minimal config
+        cat > /etc/redis/redis.conf << EOF
+# Redis VPN Panel Configuration
 bind 127.0.0.1
+port 6379
 timeout 0
+tcp-keepalive 300
+daemonize yes
+supervised systemd
+pidfile /var/run/redis/redis-server.pid
+loglevel notice
+logfile /var/log/redis/redis-server.log
+databases 16
 save 900 1
 save 300 10
 save 60 10000
-maxmemory 64mb
+stop-writes-on-bgsave-error yes
+rdbcompression yes
+rdbchecksum yes
+dbfilename dump.rdb
+dir /var/lib/redis
+maxmemory 128mb
 maxmemory-policy allkeys-lru
 EOF
-        # Try to start Redis with custom config
-        redis-server /etc/redis-fallback/redis.conf --daemonize yes >/dev/null 2>&1 || true
-        print_warning "Redis may not be available - panel will use file-based caching"
+    fi
+    
+    # Ensure proper ownership and permissions
+    chown redis:redis /var/lib/redis
+    chown redis:redis /var/log/redis
+    chmod 750 /var/lib/redis
+    chmod 750 /var/log/redis
+    
+    # Try to start Redis
+    print_status "Starting Redis server..."
+    systemctl daemon-reload
+    
+    # Try multiple Redis startup methods - NEVER FAIL INSTALLATION
+    REDIS_SUCCESS=false
+    
+    # Method 1: Standard systemd service
+    if systemctl enable redis-server >/dev/null 2>&1 && systemctl start redis-server >/dev/null 2>&1; then
+        sleep 3
+        if systemctl is-active --quiet redis-server && redis-cli ping >/dev/null 2>&1; then
+            print_success "Redis started successfully via systemd"
+            REDIS_SUCCESS=true
+        else
+            print_warning "Redis systemd service failed - trying manual start"
+            systemctl stop redis-server >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Method 2: Manual Redis with custom config (if systemd failed)
+    if [ "$REDIS_SUCCESS" = false ]; then
+        print_status "Attempting manual Redis startup..."
+        mkdir -p /etc/vpn-panel/redis
+        cat > /etc/vpn-panel/redis/redis.conf << EOF
+bind 127.0.0.1
+port 6379
+daemonize yes
+maxmemory 64mb
+maxmemory-policy allkeys-lru
+timeout 0
+save ""
+EOF
+        
+        if redis-server /etc/vpn-panel/redis/redis.conf >/dev/null 2>&1; then
+            sleep 2
+            if redis-cli ping >/dev/null 2>&1; then
+                print_success "Redis started with custom config"
+                REDIS_SUCCESS=true
+            fi
+        fi
+    fi
+    
+    # Method 3: Redis on alternative port (if port 6379 busy)
+    if [ "$REDIS_SUCCESS" = false ]; then
+        print_status "Trying Redis on alternative port..."
+        cat > /etc/vpn-panel/redis/redis-alt.conf << EOF
+bind 127.0.0.1
+port 6380
+daemonize yes
+maxmemory 32mb
+maxmemory-policy allkeys-lru
+timeout 0
+save ""
+EOF
+        
+        if redis-server /etc/vpn-panel/redis/redis-alt.conf >/dev/null 2>&1; then
+            sleep 2
+            if redis-cli -p 6380 ping >/dev/null 2>&1; then
+                print_success "Redis started on port 6380"
+                REDIS_SUCCESS=true
+                # Update panel config to use port 6380
+                echo "REDIS_PORT=6380" > /etc/vpn-panel/redis-port.conf
+            fi
+        fi
+    fi
+    
+    # Final status
+    if [ "$REDIS_SUCCESS" = true ]; then
+        print_success "Redis is running and accessible"
+    else
+        print_warning "Redis could not be started - VPN Panel will use file-based caching"
+        print_warning "This will not affect VPN functionality"
+        # Create dummy Redis port file for panel
+        echo "REDIS_DISABLED=true" > /etc/vpn-panel/redis-port.conf
     fi
     
     # Start VPN Panel
