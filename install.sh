@@ -797,7 +797,7 @@ Group=vpn-panel
 WorkingDirectory=/var/lib/vpn-panel
 Environment=PATH=/var/lib/vpn-panel/venv/bin
 Environment=PYTHONPATH=/var/lib/vpn-panel/src
-Environment=DB_PATH=/var/lib/vpn-panel/users.db
+Environment=DB_PATH=/var/lib/vpn-panel/vpn_panel.db
 Environment=REDIS_URL=redis://localhost:6379
 Environment=PORT=$PORT
 ExecStart=/var/lib/vpn-panel/venv/bin/python main.py
@@ -826,27 +826,15 @@ EOF
 start_services() {
     print_status "Starting services..."
     
-    # ===== REDIS TROUBLESHOOTING AND SETUP =====
-    print_status "Configuring Redis..."
-    
-    # Stop any existing Redis processes
+    # Setup Redis
     systemctl stop redis-server 2>/dev/null || true
     pkill redis-server 2>/dev/null || true
-    
-    # Clean Redis data directory
-    print_status "Cleaning Redis data..."
     rm -rf /var/lib/redis/* 2>/dev/null || true
-    rm -rf /var/log/redis/* 2>/dev/null || true
     
-    # Check if port 6379 is in use
     if netstat -tuln | grep -q ":6379 "; then
-        print_warning "Port 6379 is busy - killing processes..."
         fuser -k 6379/tcp 2>/dev/null || true
-        sleep 2
+        sleep 1
     fi
-    
-    # Fix Redis configuration
-    print_status "Fixing Redis configuration..."
     if [ -f /etc/redis/redis.conf ]; then
         # Backup original config
         cp /etc/redis/redis.conf /etc/redis/redis.conf.backup
@@ -887,85 +875,37 @@ EOF
     print_status "Starting Redis server..."
     systemctl daemon-reload
     
-    # Try multiple Redis startup methods - NEVER FAIL INSTALLATION
-    REDIS_SUCCESS=false
-    
-    # Method 1: Standard systemd service
+    # Start Redis
     if systemctl enable redis-server >/dev/null 2>&1 && systemctl start redis-server >/dev/null 2>&1; then
-        sleep 3
-        if systemctl is-active --quiet redis-server && redis-cli ping >/dev/null 2>&1; then
-            print_success "Redis started successfully via systemd"
-            REDIS_SUCCESS=true
+        sleep 2
+        if redis-cli ping >/dev/null 2>&1; then
+            print_success "Redis started successfully"
         else
-            print_warning "Redis systemd service failed - trying manual start"
-            systemctl stop redis-server >/dev/null 2>&1 || true
+            print_warning "Redis issue - continuing without cache"
         fi
-    fi
-    
-    # Method 2: Manual Redis with custom config (if systemd failed)
-    if [ "$REDIS_SUCCESS" = false ]; then
-        print_status "Attempting manual Redis startup..."
-        mkdir -p /etc/vpn-panel/redis
-        cat > /etc/vpn-panel/redis/redis.conf << EOF
-bind 127.0.0.1
-port 6379
-daemonize yes
-maxmemory 64mb
-maxmemory-policy allkeys-lru
-timeout 0
-save ""
-EOF
-        
-        if redis-server /etc/vpn-panel/redis/redis.conf >/dev/null 2>&1; then
-            sleep 2
-            if redis-cli ping >/dev/null 2>&1; then
-                print_success "Redis started with custom config"
-                REDIS_SUCCESS=true
-            fi
-        fi
-    fi
-    
-    # Method 3: Redis on alternative port (if port 6379 busy)
-    if [ "$REDIS_SUCCESS" = false ]; then
-        print_status "Trying Redis on alternative port..."
-        cat > /etc/vpn-panel/redis/redis-alt.conf << EOF
-bind 127.0.0.1
-port 6380
-daemonize yes
-maxmemory 32mb
-maxmemory-policy allkeys-lru
-timeout 0
-save ""
-EOF
-        
-        if redis-server /etc/vpn-panel/redis/redis-alt.conf >/dev/null 2>&1; then
-            sleep 2
-            if redis-cli -p 6380 ping >/dev/null 2>&1; then
-                print_success "Redis started on port 6380"
-                REDIS_SUCCESS=true
-                # Update panel config to use port 6380
-                echo "REDIS_PORT=6380" > /etc/vpn-panel/redis-port.conf
-            fi
-        fi
-    fi
-    
-    # Final status
-    if [ "$REDIS_SUCCESS" = true ]; then
-        print_success "Redis is running and accessible"
     else
-        print_warning "Redis could not be started - VPN Panel will use file-based caching"
-        print_warning "This will not affect VPN functionality"
-        # Create dummy Redis port file for panel
-        echo "REDIS_DISABLED=true" > /etc/vpn-panel/redis-port.conf
+        print_warning "Redis could not start - continuing without cache"
     fi
     
     # Start VPN Panel
     print_status "Starting VPN Panel..."
     systemctl daemon-reload
-    systemctl enable vpn-panel
-    systemctl start vpn-panel
+    systemctl enable vpn-panel >/dev/null 2>&1
+    systemctl start vpn-panel >/dev/null 2>&1
     
-    print_success "Services started successfully"
+    # Wait for service to be ready
+    sleep 3
+    
+    # Check if VPN Panel is running
+    if systemctl is-active --quiet vpn-panel; then
+        print_success "VPN Panel started successfully"
+        return 0
+    else
+        print_error "VPN Panel failed to start"
+        print_status "Checking logs..."
+        journalctl -u vpn-panel --no-pager -n 5
+        return 1
+    fi
 }
 
 # Function to create admin user
@@ -974,15 +914,43 @@ create_admin_user() {
     
     cd /var/lib/vpn-panel
     source venv/bin/activate
-    python create_admin.py "$ADMIN_USERNAME" "$ADMIN_PASSWORD"
     
-    print_success "Admin user created successfully"
+    # Try to use new database structure script first
+    if [ -f "scripts/create_proper_database.py" ]; then
+        python scripts/create_proper_database.py "$ADMIN_USERNAME" "$ADMIN_PASSWORD" >/dev/null 2>&1 && \
+        print_success "Database and admin user created with new structure" && return 0
+    fi
+    
+    # Fallback to old method
+    python create_admin.py "$ADMIN_USERNAME" "$ADMIN_PASSWORD" >/dev/null 2>&1
+    
+    if [ $? -eq 0 ]; then
+        print_success "Admin user created successfully"
+    else
+        print_error "Failed to create admin user"
+        return 1
+    fi
 }
 
 # ===== INSTALLATION COMPLETION & SUMMARY =====
 # Display final installation summary with credentials
 display_final_info() {
-    print_success "VPN Panel installation completed successfully!"
+    # Final service status check
+    print_status "Verifying installation..."
+    
+    # Check if panel is accessible
+    sleep 2
+    if curl -s --connect-timeout 5 "http://localhost:$PORT" >/dev/null 2>&1; then
+        print_success "VPN Panel is running and accessible!"
+    else
+        print_warning "Panel might need a moment to start - checking service..."
+        if systemctl is-active --quiet vpn-panel; then
+            print_success "Service is running - panel should be accessible soon"
+        else
+            print_error "Service is not running - check logs"
+            return 1
+        fi
+    fi
     
     echo ""
     echo "=================================================================="
@@ -1071,11 +1039,22 @@ main() {
     setup_openvpn
     setup_security
     create_vpn_panel_app
-    start_services
-    create_admin_user
     
-    # Display final information
-    display_final_info
+    # Start services and check success
+    if start_services; then
+        # Create admin user
+        if create_admin_user; then
+            # Only display final info if everything succeeded
+            display_final_info
+        else
+            print_error "Admin user creation failed - check logs"
+            exit 1
+        fi
+    else
+        print_error "VPN Panel failed to start - check logs"
+        print_status "Try: sudo journalctl -u vpn-panel -f"
+        exit 1
+    fi
 }
 
 # Run main function
