@@ -84,15 +84,14 @@ check_existing_installation() {
             rm -rf /var/log/vpn-panel
             rm -f /etc/systemd/system/vpn-panel.service
             
-            # Remove Redis data
-            rm -rf /var/lib/redis
+            rm -rf /var/lib/redis 2>/dev/null || true
             
-            # Clean firewall rules silently
+            systemctl daemon-reload
+            systemctl reset-failed 2>/dev/null || true
+            
             ufw --force delete allow 8000 >/dev/null 2>&1 || true
             ufw --force delete allow 1194 >/dev/null 2>&1 || true
             ufw --force delete allow 51820 >/dev/null 2>&1 || true
-            
-            systemctl daemon-reload
             print_success "Previous installation removed"
             echo ""
         else
@@ -285,7 +284,7 @@ create_directories() {
 setup_python_env() {
     print_status "Setting up Python virtual environment..."
     
-    cd /var/lib/vpn-panel
+    cd /var/lib/vpn-panel || exit 1
     
     # Create virtual environment silently
     python3 -m venv venv >/dev/null 2>&1
