@@ -358,7 +358,6 @@ set_var EASYRSA_CA_EXPIRE 3650
 set_var EASYRSA_CERT_EXPIRE 3650
 set_var EASYRSA_CRL_DAYS 3650
 set_var EASYRSA_BATCH 1
-set_var EASYRSA_REQ_CN "OpenVPN-CA"
 EOF
     
     # ===== GENERATE CERTIFICATES =====
@@ -373,14 +372,14 @@ EOF
     echo "$SERVER_NAME" > SERVER_NAME_GENERATED
     
     # Initialize PKI and create CA
-    ./easyrsa init-pki
-    EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
+    ./easyrsa init-pki >/dev/null 2>&1
+    EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch build-ca nopass >/dev/null 2>&1
     
-    # Generate server certificate
-    EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-server-full "$SERVER_NAME" nopass
+    # Generate server certificate and key
+    EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-server-full "$SERVER_NAME" nopass >/dev/null 2>&1
     
     # Generate CRL (Certificate Revocation List)
-    EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
+    EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl >/dev/null 2>&1
     
     # Generate tls-crypt key
     openvpn --genkey secret tls-crypt.key
